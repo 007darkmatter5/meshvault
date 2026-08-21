@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>MeshVault</Name>
-  <Repository>ghcr.io/Darkmatter5/meshvault:latest</Repository>
-  <Registry>https://github.com/Darkmatter5/meshvault/pkgs/container/meshvault</Registry>
+  <Repository>ghcr.io/007darkmatter5/meshvault:latest</Repository>
+  <Registry>https://github.com/007darkmatter5/meshvault/pkgs/container/meshvault</Registry>
   <Branch>
     <Tag>latest</Tag>
     <TagDescription>Latest build from main</TagDescription>
@@ -11,8 +11,8 @@
   <MyIP/>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/Darkmatter5/meshvault/issues</Support>
-  <Project>https://github.com/Darkmatter5/meshvault</Project>
+  <Support>https://github.com/007darkmatter5/meshvault/issues</Support>
+  <Project>https://github.com/007darkmatter5/meshvault</Project>
   <Overview>
     A self-hosted catalog for a 3D printing model collection.
 
@@ -29,7 +29,7 @@
   <Category>MediaApp:Other Productivity:</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <TemplateURL/>
-  <Icon>https://raw.githubusercontent.com/Darkmatter5/meshvault/main/unraid/meshvault.png</Icon>
+  <Icon>https://raw.githubusercontent.com/007darkmatter5/meshvault/main/unraid/meshvault.png</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>

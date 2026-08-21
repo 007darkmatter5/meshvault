@@ -1,6 +1,6 @@
 services:
   meshvault:
-    image: ghcr.io/Darkmatter5/meshvault:latest
+    image: ghcr.io/007darkmatter5/meshvault:latest
     # To build locally instead of pulling, comment out `image:` above and
     # uncomment this:
     # build: .
