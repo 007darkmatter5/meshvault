@@ -16,13 +16,29 @@ imaging libraries, no external services.
 
 ### Using the template
 
-1. Go to the **Docker** tab → **Add Container**.
-2. Paste this into **Template** (or add the repo as a template source):
-   `https://raw.githubusercontent.com/007darkmatter5/meshvault/main/unraid/meshvault.xml`
-3. Check the two paths:
+Unraid has no "paste a template URL" box on the Add Container page. Register the repository
+once instead, and the template shows up in the Template dropdown from then on.
+
+1. **Docker** tab → turn on **Advanced View** (top right). The field is hidden in Basic View.
+2. Scroll to **Template Repositories** at the bottom and add, on its own line:
+   `https://github.com/007darkmatter5/meshvault`
+3. **Save**. Unraid fetches the repo and scans it for templates.
+4. **Add Container** → pick **MeshVault** from the **Template** dropdown.
+5. Check the two paths:
    - **App Data** → `/mnt/user/appdata/meshvault` (put this on **cache or an SSD**)
    - **Model Library** → wherever your models live, mounted **read-only** by default
-4. Apply, then open the WebUI and **create the first account** — it becomes the administrator.
+6. Apply, then open the WebUI and **create the first account** — it becomes the administrator.
+
+If it does not appear in the dropdown, drop the template straight onto the flash drive
+instead. This always works, but will not pick up template changes later:
+
+```bash
+mkdir -p /boot/config/plugins/dockerMan/templates-user
+cd /boot/config/plugins/dockerMan/templates-user
+wget https://raw.githubusercontent.com/007darkmatter5/meshvault/main/unraid/meshvault.xml
+```
+
+It then appears under **User templates**.
 
 ### Or by hand
 
