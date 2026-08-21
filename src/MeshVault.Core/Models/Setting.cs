@@ -19,4 +19,7 @@ public static class SettingKeys
 
     /// <summary>When true, anyone who can reach the site may create an account.</summary>
     public const string RegistrationOpen = "accounts.registrationOpen";
+
+    /// <summary>Render version the existing thumbnails were produced with.</summary>
+    public const string ThumbnailRenderVersion = "previews.renderVersion";
 }

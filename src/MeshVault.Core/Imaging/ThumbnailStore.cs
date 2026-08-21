@@ -7,7 +7,7 @@ namespace MeshVault.Core.Imaging;
 public class ThumbnailStore(string rootDirectory)
 {
     /// <summary>Bumped when rendering changes enough that cached images should be redone.</summary>
-    public const int RenderVersion = 1;
+    public const int RenderVersion = 2;
 
     private string FileDirectory => Path.Combine(rootDirectory, "files");
     private string ModelDirectory => Path.Combine(rootDirectory, "models");

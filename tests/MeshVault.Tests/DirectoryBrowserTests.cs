@@ -166,14 +166,23 @@ public class DirectoryBrowserTests : IDisposable
     [Fact]
     public void Roots_are_returned_without_touching_any_drive()
     {
+        // Warm up: the first call pays JIT and the first drive enumeration,
+        // which is unrelated to the per-drive probing this guards against.
+        _browser.GetRoots();
+
         var elapsed = Stopwatch.StartNew();
         var roots = _browser.GetRoots();
         elapsed.Stop();
 
         Assert.NotEmpty(roots);
+        // The real assertion: nothing has been probed.
         Assert.All(roots, r => Assert.False(r.Probed));
-        Assert.True(elapsed.ElapsedMilliseconds < 100,
-            $"GetRoots took {elapsed.ElapsedMilliseconds}ms; it must not do per-drive I/O.");
+
+        // Generous, because it runs on a shared machine. The regression it
+        // catches was 4.9 seconds for six drives, so a second is ample and
+        // does not turn ordinary scheduling noise into a failure.
+        Assert.True(elapsed.ElapsedMilliseconds < 1000,
+            $"GetRoots took {elapsed.ElapsedMilliseconds}ms; it must not probe each drive.");
     }
 
     public void Dispose()

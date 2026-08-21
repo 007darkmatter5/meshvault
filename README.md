@@ -18,7 +18,7 @@ imaging libraries, no external services.
 
 1. Go to the **Docker** tab → **Add Container**.
 2. Paste this into **Template** (or add the repo as a template source):
-   `https://raw.githubusercontent.com/OWNER/meshvault/main/unraid/meshvault.xml`
+   `https://raw.githubusercontent.com/Darkmatter5/meshvault/main/unraid/meshvault.xml`
 3. Check the two paths:
    - **App Data** → `/mnt/user/appdata/meshvault` (put this on **cache or an SSD**)
    - **Model Library** → wherever your models live, mounted **read-only** by default
@@ -30,7 +30,7 @@ Docker tab → Add Container → toggle to advanced view:
 
 | Field | Value |
 | --- | --- |
-| Repository | `ghcr.io/OWNER/meshvault:latest` |
+| Repository | `ghcr.io/Darkmatter5/meshvault:latest` |
 | Network Type | `Bridge` |
 | Port | `8080` → `8080` |
 | Path | `/mnt/user/appdata/meshvault` → `/data` (rw) |
@@ -41,7 +41,7 @@ Docker tab → Add Container → toggle to advanced view:
 ### Or with compose
 
 ```bash
-git clone https://github.com/OWNER/meshvault.git
+git clone https://github.com/Darkmatter5/meshvault.git
 cd meshvault
 # edit docker-compose.yml: set your library path
 docker compose up -d

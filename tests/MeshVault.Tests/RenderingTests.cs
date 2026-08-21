@@ -215,6 +215,48 @@ public class RenderingTests
         Assert.True(Drawn(MeshRasterizer.RenderPng(reversed, options), options) > 50);
     }
 
+    /// <summary>
+    /// A surface facing the camera must be lit, not just ambient. Orienting
+    /// normals by screen-space winding flipped them away from the viewer, so
+    /// every front face rendered at the ambient floor and models looked flat
+    /// and dim while every coverage and determinism test still passed.
+    /// </summary>
+    [Fact]
+    public void A_surface_facing_the_camera_is_lit_not_just_ambient()
+    {
+        // A quad square-on to the camera: no rotation, so it faces +Z in view space.
+        var quad = new InMemoryMesh(
+            new Triangle(new Vector3(-10, -10, 0), new Vector3(10, -10, 0), new Vector3(10, 10, 0)),
+            new Triangle(new Vector3(-10, -10, 0), new Vector3(10, 10, 0), new Vector3(-10, 10, 0)));
+
+        var options = new RenderOptions { Width = 40, Height = 40, Yaw = 0, Pitch = 0, ZUp = false };
+        var (_, _, pixels) = DecodePng(MeshRasterizer.RenderPng(quad, options));
+
+        // Sample the centre, which is definitely covered.
+        var index = (20 * 40 + 20) * 4;
+        var brightness = (pixels[index] + pixels[index + 1] + pixels[index + 2]) / 3.0;
+
+        // Ambient alone is 0.18 of the base colour, well under 60/255.
+        Assert.True(brightness > 60,
+            $"front face rendered at brightness {brightness:0}; it is only getting ambient light");
+    }
+
+    /// <summary>Winding must not change how a face is lit.</summary>
+    [Fact]
+    public void Lighting_does_not_depend_on_winding()
+    {
+        var forward = new InMemoryMesh(new Triangle(
+            new Vector3(-10, -10, 0), new Vector3(10, -10, 0), new Vector3(0, 10, 0)));
+        var reversed = new InMemoryMesh(new Triangle(
+            new Vector3(-10, -10, 0), new Vector3(0, 10, 0), new Vector3(10, -10, 0)));
+
+        var options = new RenderOptions { Width = 40, Height = 40, Yaw = 0, Pitch = 0, ZUp = false };
+
+        Assert.Equal(
+            MeshRasterizer.RenderPng(forward, options),
+            MeshRasterizer.RenderPng(reversed, options));
+    }
+
     [Fact]
     public void Rendering_can_be_cancelled()
     {

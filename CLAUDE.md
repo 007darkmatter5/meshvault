@@ -1,0 +1,152 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+```bash
+dotnet build                                  # whole solution
+dotnet test                                   # all 176 tests, ~4s
+dotnet run --project src/MeshVault.Web        # http://localhost:5099 in Development
+
+# One class, or one test
+dotnet test --filter "FullyQualifiedName~MeshDecimatorTests"
+dotnet test --filter "FullyQualifiedName~UserAdminTests.The_last_administrator_cannot_be_deleted"
+
+# Full failure detail: -v q hides it, and the summary line alone will not say which test failed
+dotnet test --nologo 2>&1 | grep -A8 "Error Message"
+```
+
+**Stop the running app before building.** It holds `MeshVault.Core.dll` and `MeshVault.Data.dll`
+open, and the build fails with `MSB3021 ... being used by another process`:
+`taskkill //F //IM MeshVault.Web.exe`.
+
+### Migrations
+
+`dotnet-ef` is installed globally; it needs `~/.dotnet/tools` on PATH.
+
+```bash
+dotnet ef migrations add <Name> -p src/MeshVault.Data -s src/MeshVault.Web -o Migrations
+```
+
+Migrations apply automatically at startup via `DatabaseInitializer`. When a migration drops a
+column whose data must survive, hand-write the transfer SQL into the generated `Up()` **before**
+the `DropColumn` calls — see `DesignersCollectionsAndFavorites`, which moved `IsFavorite` into a
+per-user table and a `Designer` string into an entity without losing anything.
+
+## Architecture
+
+Four projects, dependencies pointing inward: `Web → Data → Core`, with `Tests` referencing all
+three (it needs `Web` for the background services and Razor guard).
+
+- **`MeshVault.Core`** — no EF, no ASP.NET. Domain models, `FolderScanner`, mesh parsing
+  (`Meshes/`), and the software renderer (`Imaging/`).
+- **`MeshVault.Data`** — `MeshVaultDbContext` (also the Identity store), the reconciling
+  `LibraryIndexer`, read-side `ModelCatalog`, write-side `ModelEditor`, `DatapackageImporter`.
+- **`MeshVault.Web`** — Blazor Server UI, auth, HTTP endpoints, background workers.
+
+### Render modes — read this before touching `App.razor` or `MainLayout.razor`
+
+Interactivity is declared **per page** (`@rendermode InteractiveServer`), never globally on
+`<Routes />`. This is load-bearing:
+
+- Sign-in must be **statically** rendered. `EditForm`'s `FormName` only participates in static
+  SSR form mapping, and setting an auth cookie needs a live response. Making the router globally
+  interactive breaks login with *"The POST request does not specify which form is being submitted"*.
+- Because the layout is static, MudBlazor's providers live in `Layout/MudProviders.razor`, hosted
+  as a single interactive island from `App.razor`. Dialogs and snackbars stop working if that is
+  removed.
+- For the same reason the app bar uses plain links and a form post rather than `MudMenu`.
+
+No test covers this. Manually exercise sign-in after changing `App.razor`, `Routes.razor`,
+`MainLayout.razor` or anything under `Components/Account/`.
+
+### Per-user data
+
+`ICurrentUser.UserId` is the owner of collections and favorites, resolved from claims by
+`SignedInUser`. Anonymous requests fall back to `Users.LocalUserId` (`"local"`), which predates
+authentication; the first account to register adopts that data (`AccountSetup.AdoptLegacyDataAsync`).
+Tags, designers and source metadata are shared — they describe the model, not the viewer.
+
+`ModelCatalog` returns `ModelCard` (model + `IsFavorite`) rather than `ModelEntry`, because
+"is this a favorite" depends on who is asking.
+
+### Scanning and indexing
+
+A folder becomes a model when it **directly** contains a mesh or CAD file; subfolders with no
+models of their own are absorbed into it. `LibraryIndexer` **reconciles** rather than rebuilds, so
+tags, notes, favorites and collections survive rescans — `LibraryIndexerTests` pins this. Editing a
+file clears its derived data (hash, triangle count, thumbnail state) so it regenerates.
+
+### Mesh pipeline
+
+`StagedMeshFile` copies a mesh to local disk once before parsing. The renderer makes two passes
+(framing, then rasterising), and the target library may be a slow network share — measured at
+~1.4 MB/s on the author's setup, where re-reading turned a 1.1s render into 131s. Parallel readers
+bought only 1.24x, so `ThumbnailService` uses concurrency 3 deliberately.
+
+`MeshPayload` sends the browser quantised 16-bit positions (18 bytes/triangle vs 50 in a binary
+STL); the shader derives normals. Over budget, `MeshDecimator` reduces by **vertex clustering** —
+never by keeping every Nth triangle, which shreds dense models into disconnected facets.
+
+Viewer geometry is Z-up mesh data rotated to three.js's Y-up on load. Skipping that rotation makes
+horizontal drag spin the model about its front-to-back axis.
+
+`GeometryCache.FormatVersion` invalidates cached payloads; bump it when the payload or the way it
+is built changes, and `PruneOldVersions()` clears the orphans at startup.
+
+### Background work
+
+`ScanService`, `ImportService` and `ThumbnailService` all run off the request thread and raise a
+`Changed` event that pages subscribe to.
+
+- Clear "running" state **before** raising the completion event. Subscribers call `IsRunning()`
+  while handling it, so announcing first leaves the UI stuck on "Scanning…" forever.
+- Invoke handlers one at a time; one dead circuit must not stop the rest being notified.
+- `ForegroundActivity` is the backpressure valve: the geometry endpoint claims it, and the
+  thumbnail worker waits. Without it a model the user opened queues behind 32 background reads.
+
+### HTTP endpoints
+
+`MediaEndpoints` (`/thumb`, `/mesh`, `/snapshot`) and `/health` are plain minimal APIs because the
+browser requests them directly. Media requires authentication; `/health` is anonymous and returns
+nothing about the library.
+
+They also **disable `IStatusCodePagesFeature`** per request. Left on, a 404 for a missing thumbnail
+re-executes through Blazor and answers an `<img>` tag with 21 KB of HTML, and a 404 from a POST
+becomes a content-type 400.
+
+### Accounts
+
+First registration becomes Admin and closes registration (`SettingKeys.RegistrationOpen`).
+`UserAdmin` refuses to demote, suspend or delete the last administrator, or to delete the acting
+account — on a self-hosted app that mistake means editing SQLite by hand. Deleting a user also
+removes their collections and favorites, which reference the owner by id rather than a foreign key
+and would otherwise linger unreachable.
+
+Password rules are **length-only** (10 characters, no composition requirements). They are declared
+in `Program.cs`, `Register.razor`, `Account.razor` and each test harness — change all of them together.
+
+Settings chosen in the UI go in the `Settings` table via `SettingsStore`; deployment settings come
+from `MeshVaultOptions`/environment. Do not conflate them.
+
+## Testing notes
+
+- **`Progress<T>` dispatches asynchronously.** Assertions on collected reports race the final
+  report. Use `SyncProgress<T>` in tests; this caused a ~1-in-5 flake.
+- **Razor does not warn about unresolved components** — it emits them as literal markup, so a
+  removed MudBlazor component renders as dead HTML with no build error. `RazorComponentTests`
+  reflects over the assembly to catch this. Generic components reflect as ``MudSelect`1``.
+- Identity test harnesses need `services.AddDataProtection()`, or `AddDefaultTokenProviders` fails
+  to resolve.
+- Rendering tests decode the PNG back to pixels and assert coverage. A test that only checks "a PNG
+  came out" passed happily while the depth buffer was inverted and nothing drew at all.
+- The library share is slow enough that performance intuitions are usually wrong here. Measure
+  before optimising — a scratch console project referencing `MeshVault.Core` is the quickest way.
+
+## Deployment
+
+Ships as a container image to GHCR via `.github/workflows/ci.yml`; `unraid/meshvault.xml` is the
+Unraid template. `/data` holds the SQLite database, thumbnails, geometry cache **and the data
+protection keys** — without persisting those, every image update signs everyone out.
+`README.md` has the install steps and the full configuration table.

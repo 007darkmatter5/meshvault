@@ -1,3 +1,4 @@
+using MeshVault.Core.Imaging;
 using MeshVault.Core.Meshes;
 using MeshVault.Core.Models;
 using MeshVault.Data;
@@ -46,5 +47,34 @@ public static class DatabaseInitializer
         // otherwise sit on disk forever.
         var pruned = sp.GetRequiredService<GeometryCache>().PruneOldVersions();
         if (pruned > 0) log.LogInformation("Removed {Count} outdated geometry payloads", pruned);
+
+        await RequeueThumbnailsIfRendererChangedAsync(sp, db, log);
+    }
+
+    /// <summary>
+    /// Queues every thumbnail for re-rendering when the renderer has changed in
+    /// a way that alters the output. Without this a fix to the renderer only
+    /// reaches models added afterwards, and the library keeps showing images
+    /// produced by the old, wrong code.
+    /// </summary>
+    private static async Task RequeueThumbnailsIfRendererChangedAsync(
+        IServiceProvider sp, MeshVaultDbContext db, ILogger log)
+    {
+        var settings = sp.GetRequiredService<SettingsStore>();
+        var rendered = await settings.GetIntAsync(SettingKeys.ThumbnailRenderVersion, fallback: 0);
+
+        if (rendered == ThumbnailStore.RenderVersion) return;
+
+        // Snapshots the user chose are theirs and are never regenerated.
+        var queued = await db.Files
+            .Where(f => f.ThumbnailState == ThumbnailState.Ready
+                     || f.ThumbnailState == ThumbnailState.Failed)
+            .ExecuteUpdateAsync(s => s.SetProperty(f => f.ThumbnailState, ThumbnailState.Pending));
+
+        await settings.SetIntAsync(SettingKeys.ThumbnailRenderVersion, ThumbnailStore.RenderVersion);
+
+        log.LogInformation(
+            "Renderer changed from version {Old} to {New}; queued {Count} thumbnail(s) to be redone",
+            rendered, ThumbnailStore.RenderVersion, queued);
     }
 }

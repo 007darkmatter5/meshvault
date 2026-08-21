@@ -141,7 +141,12 @@ public static class MeshRasterizer
         // Back faces are kept: printable meshes are frequently inconsistently
         // wound, and dropping them punches holes in the render.
         var normal = Vector3.Normalize(Vector3.Cross(b - a, c - a));
-        if (area < 0) normal = -normal;
+
+        // Orient by view-space depth, not by the screen-space winding. Project
+        // negates Y, so a triangle facing the camera comes out negatively wound
+        // and keying off `area` flipped its normal away from the viewer,
+        // leaving every front-facing surface lit by ambient alone.
+        if (normal.Z < 0) normal = -normal;
 
         var shade = Shade(normal, options);
 
