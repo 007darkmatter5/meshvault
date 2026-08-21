@@ -1,0 +1,9 @@
+@* MudBlazor's providers need a circuit to render dialogs, popovers and
+   snackbars. They live here, hosted as one interactive island from App.razor,
+   so the layout and the sign-in pages can stay statically rendered. Sign-in
+   writes a cookie, which an interactive component cannot do. *@
+
+<MudThemeProvider Theme="MainLayout.Theme" IsDarkMode="true" />
+<MudPopoverProvider />
+<MudDialogProvider CloseButton="true" MaxWidth="MaxWidth.Medium" FullWidth="true" />
+<MudSnackbarProvider />

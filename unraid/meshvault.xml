@@ -1,0 +1,68 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>MeshVault</Name>
+  <Repository>ghcr.io/OWNER/meshvault:latest</Repository>
+  <Registry>https://github.com/OWNER/meshvault/pkgs/container/meshvault</Registry>
+  <Branch>
+    <Tag>latest</Tag>
+    <TagDescription>Latest build from main</TagDescription>
+  </Branch>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/OWNER/meshvault/issues</Support>
+  <Project>https://github.com/OWNER/meshvault</Project>
+  <Overview>
+    A self-hosted catalog for a 3D printing model collection.
+
+    Indexes your model folders in place - files are never moved or renamed unless you
+    allow it - and adds search, tags, collections, designers, source links, per-model
+    notes, rendered thumbnails and an in-browser 3D preview you can rotate and snapshot.
+
+    Supports STL and 3MF. Multi-user, with private collections and favorites per account.
+    The first account you create becomes the administrator.
+
+    Keep the /data volume on cache or an unassigned SSD: it holds a SQLite database, and
+    SQLite over a network share is unreliable.
+  </Overview>
+  <Category>MediaApp:Other Productivity:</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/OWNER/meshvault/main/unraid/meshvault.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+
+  <Config Name="WebUI Port" Target="8080" Default="8080" Mode="tcp"
+          Description="Port for the MeshVault web interface."
+          Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+
+  <Config Name="App Data" Target="/data" Default="/mnt/user/appdata/meshvault" Mode="rw"
+          Description="Database, thumbnails, 3D preview cache and sign-in keys. Put this on cache or an SSD - SQLite over a network share is unreliable. Back it up: it holds your tags, collections and notes."
+          Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/meshvault</Config>
+
+  <Config Name="Model Library" Target="/models" Default="/mnt/user/models" Mode="ro"
+          Description="Your 3D model folder. Mounted read-only by default so MeshVault can never touch your files. Change to rw only if you want it to organise them for you."
+          Type="Path" Display="always" Required="true" Mask="false">/mnt/user/models</Config>
+
+  <Config Name="Library Name" Target="MeshVault__Libraries__0__Name" Default="Models" Mode=""
+          Description="Name shown for the library above."
+          Type="Variable" Display="always" Required="false" Mask="false">Models</Config>
+
+  <Config Name="Library Path" Target="MeshVault__Libraries__0__Path" Default="/models" Mode=""
+          Description="Path inside the container for the library. Leave as /models unless you changed the mount above."
+          Type="Variable" Display="advanced" Required="false" Mask="false">/models</Config>
+
+  <Config Name="Rescan Interval (hours)" Target="MeshVault__RescanIntervalHours" Default="12" Mode=""
+          Description="Skip the startup scan if the library was scanned this recently. A full walk of a large library takes minutes. Set to 0 to always rescan on start."
+          Type="Variable" Display="advanced" Required="false" Mask="false">12</Config>
+
+  <Config Name="Timezone" Target="TZ" Default="Etc/UTC" Mode=""
+          Description="Timezone for dates shown in the UI."
+          Type="Variable" Display="advanced" Required="false" Mask="false">Etc/UTC</Config>
+</Container>

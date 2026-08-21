@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MeshVault.Core/MeshVault.Core.csproj" />
+    <Project Path="src/MeshVault.Data/MeshVault.Data.csproj" />
+    <Project Path="src/MeshVault.Web/MeshVault.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MeshVault.Tests/MeshVault.Tests.csproj" />
+  </Folder>
+</Solution>

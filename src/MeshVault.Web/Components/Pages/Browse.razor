@@ -1,0 +1,369 @@
+@page "/"
+@page "/browse"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@implements IDisposable
+@inject ModelCatalog Catalog
+@inject ModelEditor Editor
+
+<PageTitle>MeshVault</PageTitle>
+
+<MudGrid Spacing="4">
+    <MudItem xs="12" md="3" lg="2">
+        <MudPaper Outlined="true" Class="pa-4">
+            <MudStack Spacing="4">
+                <MudSelect T="int?" Value="_libraryId" ValueChanged="@(v => Apply(() => _libraryId = v))"
+                           Label="Library" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                    <MudSelectItem T="int?" Value="@(null)">All libraries</MudSelectItem>
+                    @foreach (var library in _libraries)
+                    {
+                        <MudSelectItem T="int?" Value="@library.Id">@library.Name</MudSelectItem>
+                    }
+                </MudSelect>
+
+                @if (_designers.Count > 0)
+                {
+                    <MudSelect T="int?" Value="_designerId" ValueChanged="@(v => Apply(() => _designerId = v))"
+                               Label="Designer" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                        <MudSelectItem T="int?" Value="@(null)">Any designer</MudSelectItem>
+                        @foreach (var entry in _designers)
+                        {
+                            <MudSelectItem T="int?" Value="@entry.Designer.Id">
+                                @entry.Designer.Name (@entry.Count)
+                            </MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+
+                @if (_collections.Count > 0)
+                {
+                    <MudSelect T="int?" Value="_collectionId" ValueChanged="@(v => Apply(() => _collectionId = v))"
+                               Label="Collection" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                        <MudSelectItem T="int?" Value="@(null)">Any collection</MudSelectItem>
+                        @foreach (var entry in _collections)
+                        {
+                            <MudSelectItem T="int?" Value="@entry.Collection.Id">
+                                @entry.Collection.Name (@entry.Count)
+                            </MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+
+                @if (_sites.Count > 0)
+                {
+                    <MudSelect T="string" Value="_site" ValueChanged="@(v => Apply(() => _site = v))"
+                               Label="Source" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                        <MudSelectItem T="string" Value="@(null)">Any source</MudSelectItem>
+                        @foreach (var entry in _sites)
+                        {
+                            <MudSelectItem T="string" Value="@entry.Site">@entry.Site (@entry.Count)</MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+
+                <MudSelect T="ModelSort" Value="_sort" ValueChanged="@(v => Apply(() => _sort = v))"
+                           Label="Sort" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem T="ModelSort" Value="ModelSort.Name">Name</MudSelectItem>
+                    <MudSelectItem T="ModelSort" Value="ModelSort.Newest">Recently added</MudSelectItem>
+                    <MudSelectItem T="ModelSort" Value="ModelSort.Largest">Largest</MudSelectItem>
+                </MudSelect>
+
+                <MudStack Spacing="1">
+                    <MudSwitch T="bool" Value="_favoritesOnly" ValueChanged="@(v => Apply(() => _favoritesOnly = v))"
+                               Color="Color.Warning" Label="Favorites only" />
+                    <MudSwitch T="bool" Value="_missingDesigner" ValueChanged="@(v => Apply(() => _missingDesigner = v))"
+                               Color="Color.Info" Label="No designer set" />
+                    <MudSwitch T="bool" Value="_missingSource" ValueChanged="@(v => Apply(() => _missingSource = v))"
+                               Color="Color.Info" Label="No source link" />
+                </MudStack>
+
+                @if (_tagCounts.Count > 0)
+                {
+                    <div>
+                        <MudText Typo="Typo.overline" Class="mud-text-secondary">Tags</MudText>
+                        <div class="d-flex flex-wrap gap-1 mt-2">
+                            @foreach (var entry in _tagCounts)
+                            {
+                                var normalized = entry.Tag.NormalizedName;
+                                var active = _selectedTags.Contains(normalized);
+                                <MudChip T="string" Size="Size.Small" Class="ma-0"
+                                         Color="@(active ? Color.Primary : Color.Default)"
+                                         Variant="@(active ? Variant.Filled : Variant.Outlined)"
+                                         OnClick="@(() => ToggleTag(normalized))">
+                                    @entry.Tag.Name (@entry.Count)
+                                </MudChip>
+                            }
+                        </div>
+                    </div>
+                }
+
+                @if (HasFilters)
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.FilterAltOff"
+                               OnClick="ClearFilters">Clear filters</MudButton>
+                }
+            </MudStack>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="9" lg="10">
+        <div class="d-flex align-center gap-4 mb-4">
+            <MudTextField T="string" Value="_search" ValueChanged="@(v => Apply(() => _search = v ?? ""))"
+                          Immediate="true" DebounceInterval="250" Placeholder="Search models, designers..."
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Style="max-width:420px" />
+            @if (_result is not null)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    @_result.TotalCount.ToString("N0") @(_result.TotalCount == 1 ? "model" : "models")
+                </MudText>
+            }
+            @if (_loading)
+            {
+                <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+            }
+        </div>
+
+        @if (_result is null)
+        {
+            <MudSkeleton Height="200px" />
+        }
+        else if (_result.Items.Count == 0)
+        {
+            <MudPaper Outlined="true" Class="pa-12 d-flex flex-column align-center gap-3">
+                <MudIcon Icon="@Icons.Material.Filled.SearchOff" Size="Size.Large" Class="mud-text-secondary" />
+                <MudText Typo="Typo.h6">Nothing here yet</MudText>
+                @if (_libraries.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                        No libraries are configured. Add the folder your models live in to get started.
+                    </MudText>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="/libraries"
+                               StartIcon="@Icons.Material.Filled.Add">Add a library</MudButton>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                        No models match the current filters.
+                    </MudText>
+                }
+            </MudPaper>
+        }
+        else
+        {
+            <div class="model-grid">
+                @foreach (var card in _result.Items)
+                {
+                    var model = card.Model;
+                    <MudCard Outlined="true" Class="model-card" @key="model.Id">
+                        @* A real anchor rather than a click handler, so middle-click
+                           and "open in new tab" behave as expected. *@
+                        <a class="model-card-link" href="@($"/model/{model.Id}")">
+                            <div class="model-thumb">
+                                @if (HasImage(model))
+                                {
+                                    @* loading="lazy" matters: a page of 60 cards would
+                                       otherwise fire 60 requests at once. *@
+                                    <img class="model-thumb-img" loading="lazy" decoding="async"
+                                         src="@ThumbUrl(model)" alt="@model.Name" />
+                                }
+                                else
+                                {
+                                    <MudIcon Icon="@Icons.Material.Filled.ViewInAr" Size="Size.Large" />
+                                }
+                                <span class="model-thumb-count">@MeshCount(model)</span>
+                            </div>
+                            <MudCardContent Class="pa-3">
+                                <div class="d-flex align-center justify-space-between gap-1">
+                                    <MudText Typo="Typo.body2" Class="model-title" title="@model.RelativePath">
+                                        @model.Name
+                                    </MudText>
+                                    @if (card.IsFavorite)
+                                    {
+                                        <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Warning" Size="Size.Small" />
+                                    }
+                                </div>
+                                @if (model.Designer is not null)
+                                {
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block model-title">
+                                        by @model.Designer.Name
+                                    </MudText>
+                                }
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                    @Formats.Bytes(model.TotalBytes) &middot;
+                                    @model.Files.Count @(model.Files.Count == 1 ? "file" : "files")
+                                </MudText>
+                                <div class="d-flex flex-wrap gap-1 mt-2">
+                                    @if (model.SourceSite is not null)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                                                 Color="Color.Dark" Class="ma-0">@model.SourceSite</MudChip>
+                                    }
+                                    @foreach (var tag in model.Tags.Take(2))
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">
+                                            @tag.Name
+                                        </MudChip>
+                                    }
+                                </div>
+                            </MudCardContent>
+                        </a>
+                    </MudCard>
+                }
+            </div>
+
+            @if (_result.TotalPages > 1)
+            {
+                <div class="d-flex justify-center mt-6">
+                    <MudPagination Count="_result.TotalPages" Selected="_page" SelectedChanged="GoToPage"
+                                   Color="Color.Primary" Rectangular="true" />
+                </div>
+            }
+        }
+    </MudItem>
+</MudGrid>
+
+@code {
+    // Set by links from the Designers and Collections pages.
+    [SupplyParameterFromQuery] public int? DesignerId { get; set; }
+    [SupplyParameterFromQuery] public int? CollectionId { get; set; }
+    [SupplyParameterFromQuery] public bool? MissingDesigner { get; set; }
+    [SupplyParameterFromQuery] public bool? MissingSource { get; set; }
+    [SupplyParameterFromQuery] public string? Site { get; set; }
+
+    private List<Library> _libraries = [];
+    private List<(Tag Tag, int Count)> _tagCounts = [];
+    private List<(Designer Designer, int Count)> _designers = [];
+    private List<(Collection Collection, int Count)> _collections = [];
+    private List<(string Site, int Count)> _sites = [];
+    private PagedResult<ModelCard>? _result;
+    private readonly HashSet<string> _selectedTags = [];
+
+    private string _search = "";
+    private int? _libraryId;
+    private int? _designerId;
+    private int? _collectionId;
+    private string? _site;
+    private ModelSort _sort = ModelSort.Name;
+    private bool _favoritesOnly;
+    private bool _missingDesigner;
+    private bool _missingSource;
+    private int _page = 1;
+    private bool _loading;
+
+    // Guards against a slow earlier query overwriting a newer one's results.
+    private CancellationTokenSource? _inFlight;
+
+    private bool HasFilters =>
+        !string.IsNullOrEmpty(_search) || _libraryId is not null || _designerId is not null
+        || _collectionId is not null || _site is not null || _favoritesOnly
+        || _missingDesigner || _missingSource || _selectedTags.Count > 0;
+
+    protected override async Task OnInitializedAsync() => await LoadFacetsAsync();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Query-string filters win on navigation, so a link from Designers or
+        // Collections lands with that filter already applied.
+        _designerId = DesignerId;
+        _collectionId = CollectionId;
+        _missingDesigner = MissingDesigner ?? false;
+        _missingSource = MissingSource ?? false;
+        _site = Site;
+        _page = 1;
+        await LoadAsync();
+    }
+
+    private async Task LoadFacetsAsync()
+    {
+        _libraries = await Catalog.GetLibrariesAsync();
+        _tagCounts = await Catalog.GetTagCountsAsync();
+        _designers = await Catalog.GetDesignersAsync();
+        _collections = await Catalog.GetCollectionsAsync();
+        _sites = await Catalog.GetSourceSitesAsync();
+    }
+
+    private static int MeshCount(ModelEntry model) => model.Files.Count(f => f.Kind == FileKind.Mesh);
+
+    private static bool HasImage(ModelEntry model) =>
+        model.SnapshotUpdatedUtc is not null || model.ThumbnailFileId is not null;
+
+    /// <summary>
+    /// The snapshot timestamp is part of the URL so that replacing a card image
+    /// is visible immediately rather than after the browser cache expires.
+    /// </summary>
+    private static string ThumbUrl(ModelEntry model) =>
+        model.SnapshotUpdatedUtc is { } stamp
+            ? $"/thumb/model/{model.Id}?v={stamp.ToUnixTimeSeconds()}"
+            : $"/thumb/model/{model.Id}";
+
+    private async Task LoadAsync()
+    {
+        _inFlight?.Cancel();
+        _inFlight?.Dispose();
+        _inFlight = new CancellationTokenSource();
+        var token = _inFlight.Token;
+
+        _loading = true;
+        try
+        {
+            var result = await Catalog.SearchAsync(new ModelQuery
+            {
+                Search = _search,
+                LibraryId = _libraryId,
+                DesignerId = _designerId,
+                CollectionId = _collectionId,
+                SourceSite = _site,
+                Tags = _selectedTags.ToList(),
+                FavoritesOnly = _favoritesOnly,
+                MissingDesigner = _missingDesigner,
+                MissingSource = _missingSource,
+                Sort = _sort,
+                Page = _page,
+            }, token);
+
+            if (token.IsCancellationRequested) return;
+            _result = result;
+            _loading = false;
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a newer query; the newer one owns the loading flag.
+        }
+    }
+
+    /// <summary>Applies a filter change and resets to the first page.</summary>
+    private async Task Apply(Action change)
+    {
+        change();
+        _page = 1;
+        await LoadAsync();
+    }
+
+    private Task ToggleTag(string normalized) => Apply(() =>
+    {
+        if (!_selectedTags.Remove(normalized)) _selectedTags.Add(normalized);
+    });
+
+    private Task ClearFilters() => Apply(() =>
+    {
+        _search = "";
+        _libraryId = _designerId = _collectionId = null;
+        _site = null;
+        _favoritesOnly = _missingDesigner = _missingSource = false;
+        _selectedTags.Clear();
+    });
+
+    private async Task GoToPage(int page)
+    {
+        _page = Math.Max(1, page);
+        await LoadAsync();
+    }
+
+    public void Dispose()
+    {
+        _inFlight?.Cancel();
+        _inFlight?.Dispose();
+    }
+}

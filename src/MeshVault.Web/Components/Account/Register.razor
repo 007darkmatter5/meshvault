@@ -1,0 +1,141 @@
+@page "/register"
+@layout MeshVault.Web.Components.Account.AccountLayout
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Identity
+@inject SignInManager<ApplicationUser> SignIn
+@inject UserManager<ApplicationUser> Users
+@inject AccountSetup Accounts
+@inject NavigationManager Nav
+
+<PageTitle>Create an account - MeshVault</PageTitle>
+
+<div class="auth-card">
+    <div class="auth-brand">Mesh<span>Vault</span></div>
+
+    @if (!_allowed)
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true">
+            Registration is closed on this MeshVault. Ask an administrator to create an account for you.
+        </MudAlert>
+        <p class="auth-alt"><a href="/login">Back to sign in</a></p>
+    }
+    else
+    {
+        <EditForm Model="Input" method="post" OnValidSubmit="SubmitAsync" FormName="register">
+            <DataAnnotationsValidator />
+
+            <MudText Typo="Typo.h6" Class="mb-1">
+                @(_unclaimed ? "Claim this MeshVault" : "Create an account")
+            </MudText>
+            @if (_unclaimed)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-4">
+                    The first account is the administrator, and takes ownership of everything
+                    already in the library.
+                </MudText>
+            }
+
+            @if (_errors.Count > 0)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mb-4">
+                    @foreach (var error in _errors)
+                    {
+                        <div>@error</div>
+                    }
+                </MudAlert>
+            }
+
+            <div class="auth-field">
+                <label for="username">User name</label>
+                <InputText id="username" @bind-Value="Input.UserName" class="auth-input" autocomplete="username" />
+                <ValidationMessage For="() => Input.UserName" />
+            </div>
+
+            <div class="auth-field">
+                <label for="display">Display name (optional)</label>
+                <InputText id="display" @bind-Value="Input.DisplayName" class="auth-input" />
+            </div>
+
+            <div class="auth-field">
+                <label for="email">Email (optional)</label>
+                <InputText id="email" @bind-Value="Input.Email" class="auth-input" autocomplete="email" />
+                <ValidationMessage For="() => Input.Email" />
+            </div>
+
+            <div class="auth-field">
+                <label for="password">Password</label>
+                <InputText id="password" @bind-Value="Input.Password" type="password"
+                           class="auth-input" autocomplete="new-password" />
+                <ValidationMessage For="() => Input.Password" />
+            </div>
+
+            <div class="auth-field">
+                <label for="confirm">Confirm password</label>
+                <InputText id="confirm" @bind-Value="Input.ConfirmPassword" type="password"
+                           class="auth-input" autocomplete="new-password" />
+                <ValidationMessage For="() => Input.ConfirmPassword" />
+            </div>
+
+            <button type="submit" class="auth-submit">
+                @(_unclaimed ? "Create administrator account" : "Create account")
+            </button>
+        </EditForm>
+
+        <p class="auth-alt">Already have an account? <a href="/login">Sign in</a></p>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromForm] private RegisterInput Input { get; set; } = default!;
+
+    private readonly List<string> _errors = [];
+    private bool _allowed;
+    private bool _unclaimed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // The form post supplies this; it is null on the first GET.
+        Input ??= new RegisterInput();
+
+        _unclaimed = await Accounts.IsUnclaimedAsync();
+        _allowed = await Accounts.RegistrationAllowedAsync();
+    }
+
+    private async Task SubmitAsync()
+    {
+        _errors.Clear();
+
+        var result = await Accounts.RegisterAsync(
+            Input.UserName, Input.Email, Input.Password, Input.DisplayName);
+
+        if (!result.Succeeded)
+        {
+            _errors.AddRange(result.Errors.Select(e => e.Description));
+            return;
+        }
+
+        var user = await Users.FindByNameAsync(Input.UserName);
+        if (user is not null) await SignIn.SignInAsync(user, isPersistent: true);
+
+        Nav.NavigateTo("/", forceLoad: true);
+    }
+
+    private sealed class RegisterInput
+    {
+        [Required(ErrorMessage = "Choose a user name.")]
+        [StringLength(64, MinimumLength = 2, ErrorMessage = "Use between 2 and 64 characters.")]
+        public string UserName { get; set; } = "";
+
+        public string? DisplayName { get; set; }
+
+        [EmailAddress(ErrorMessage = "That does not look like an email address.")]
+        public string? Email { get; set; }
+
+        [Required(ErrorMessage = "Choose a password.")]
+        [StringLength(128, MinimumLength = 10, ErrorMessage = "Use at least 10 characters.")]
+        public string Password { get; set; } = "";
+
+        [Compare(nameof(Password), ErrorMessage = "The passwords do not match.")]
+        public string ConfirmPassword { get; set; } = "";
+    }
+}

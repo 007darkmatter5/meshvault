@@ -1,0 +1,13 @@
+@inject NavigationManager Nav
+
+@code {
+    /// <summary>
+    /// Sends an anonymous visitor to sign in, remembering where they were headed
+    /// so they land there afterwards rather than on the home page.
+    /// </summary>
+    protected override void OnInitialized()
+    {
+        var returnUrl = Nav.ToBaseRelativePath(Nav.Uri);
+        Nav.NavigateTo($"/login?returnUrl=/{returnUrl}", forceLoad: true);
+    }
+}

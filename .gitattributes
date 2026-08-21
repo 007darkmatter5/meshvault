@@ -1,0 +1,16 @@
+# Normalise to LF in the repository. The build runs on Linux, and CRLF in a
+# Dockerfile or a shell script there causes confusing failures.
+* text=auto eol=lf
+
+# Files that must be LF regardless of platform.
+Dockerfile      text eol=lf
+*.sh            text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+
+# Binary, so git should never touch them.
+*.png           binary
+*.jpg           binary
+*.stl           binary
+*.3mf           binary
+*.mvm           binary

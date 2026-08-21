@@ -1,0 +1,252 @@
+@implements IDisposable
+@inject DirectoryBrowser Browser
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Class="mr-2" Size="Size.Small" />
+            Choose a folder
+        </MudText>
+    </TitleContent>
+
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudTextField T="string" Value="_currentPath" ValueChanged="NavigateToTyped"
+                          Label="Path" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Immediate="false" Adornment="Adornment.End"
+                          AdornmentIcon="@Icons.Material.Filled.KeyboardReturn"
+                          HelperText="Type or paste a path, then press Enter" />
+
+            <MudToolBar Dense="true" Gutters="false" Class="gap-2">
+                <MudButton StartIcon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small"
+                           Disabled="@(_atRoots)" OnClick="GoUp">Up</MudButton>
+                <MudButton StartIcon="@Icons.Material.Filled.Storage" Size="Size.Small"
+                           OnClick="ShowRoots">Drives</MudButton>
+                <MudSpacer />
+                @if (_currentCount is { } count)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text"
+                             Icon="@Icons.Material.Filled.ViewInAr" Class="ma-0">
+                        @Display(count) model file@(count == 1 ? "" : "s") here
+                    </MudChip>
+                }
+            </MudToolBar>
+
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">@_error</MudAlert>
+            }
+
+            <MudPaper Outlined="true" Style="height:340px;overflow-y:auto;" Class="pa-0">
+                @if (_entries.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Class="pa-6 text-center mud-text-secondary">
+                        @(_atRoots ? "No drives found." : "No subfolders here.")
+                    </MudText>
+                }
+                else
+                {
+                    <MudList T="string" Dense="true" Class="py-0">
+                        @foreach (var entry in _entries)
+                        {
+                            var target = entry;
+                            <MudListItem T="string" @key="target.FullPath"
+                                         OnClick="@(() => Open(target))"
+                                         Disabled="@(!target.Accessible)"
+                                         Icon="@(target.Accessible ? Icons.Material.Filled.Folder : Icons.Material.Filled.FolderOff)"
+                                         IconColor="@(target.ModelFileCount > 0 ? Color.Primary : Color.Default)">
+                                <div class="d-flex align-center justify-space-between" style="width:100%">
+                                    <MudText Typo="Typo.body2">@target.Name</MudText>
+                                    @if (!target.Accessible)
+                                    {
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">unavailable</MudText>
+                                    }
+                                    else if (target.ModelFileCount is { } n && n > 0)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Primary"
+                                                 Variant="Variant.Outlined" Class="ma-0">@Display(n)</MudChip>
+                                    }
+                                    else if (!target.Probed)
+                                    {
+                                        <MudProgressCircular Indeterminate="true" Size="Size.Small"
+                                                             Style="width:14px;height:14px;opacity:.4" />
+                                    }
+                                </div>
+                            </MudListItem>
+                        }
+                    </MudList>
+                }
+            </MudPaper>
+
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                Folders are read from the machine running MeshVault. Counts show mesh and CAD files
+                directly inside each folder, and fill in as they are scanned.
+            </MudText>
+        </MudStack>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@(_atRoots || string.IsNullOrEmpty(_currentPath))"
+                   OnClick="Select">
+            Select this folder
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+
+    /// <summary>Folder to open the browser at. Falls back to the root list.</summary>
+    [Parameter] public string? StartPath { get; set; }
+
+    /// <summary>How many folders are probed at once. Keeps slow shares from queueing behind each other.</summary>
+    private const int ProbeConcurrency = 8;
+
+    private List<DirectoryEntry> _entries = [];
+    private string _currentPath = "";
+    private string? _parentPath;
+    private string? _error;
+    private int? _currentCount;
+    private bool _atRoots = true;
+
+    // Cancels probes for a listing the user has already navigated away from.
+    private CancellationTokenSource? _probes;
+
+    protected override void OnInitialized()
+    {
+        if (!string.IsNullOrWhiteSpace(StartPath) && Browser.Exists(StartPath))
+            NavigateTo(StartPath);
+        else
+            ShowRoots();
+    }
+
+    private static string Display(int count) =>
+        count >= DirectoryBrowser.MaxCountedFiles ? $"{DirectoryBrowser.MaxCountedFiles}+" : count.ToString();
+
+    /// <summary>
+    /// Swaps in a new listing and renders it right away, then probes its entries
+    /// in the background. Nothing here blocks on the filesystem.
+    /// </summary>
+    private void ShowListing(List<DirectoryEntry> entries)
+    {
+        _probes?.Cancel();
+        _probes?.Dispose();
+        _probes = new CancellationTokenSource();
+
+        _entries = entries;
+        _ = ProbeAllAsync(entries, _probes.Token);
+    }
+
+    private async Task ProbeAllAsync(List<DirectoryEntry> entries, CancellationToken ct)
+    {
+        using var gate = new SemaphoreSlim(ProbeConcurrency);
+
+        var tasks = entries.Select(async entry =>
+        {
+            await gate.WaitAsync(ct);
+            try
+            {
+                var probed = await Browser.ProbeAsync(entry, ct);
+                if (ct.IsCancellationRequested) return;
+
+                // Replace in place so the row keeps its position while filling in.
+                var index = _entries.FindIndex(e => e.FullPath == probed.FullPath);
+                if (index >= 0) _entries[index] = probed;
+
+                await InvokeAsync(StateHasChanged);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        });
+
+        try { await Task.WhenAll(tasks); }
+        catch (OperationCanceledException) { /* navigated away */ }
+    }
+
+    private void ShowRoots()
+    {
+        _error = null;
+        _atRoots = true;
+        _currentPath = "";
+        _parentPath = null;
+        _currentCount = null;
+        ShowListing(Browser.GetRoots());
+    }
+
+    private void Open(DirectoryEntry entry)
+    {
+        if (!entry.Accessible)
+        {
+            _error = $"Cannot read {entry.FullPath}.";
+            return;
+        }
+        NavigateTo(entry.FullPath);
+    }
+
+    private void NavigateToTyped(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        if (!Browser.Exists(path))
+        {
+            _error = $"Folder not found: {path}";
+            _currentPath = path;
+            return;
+        }
+        NavigateTo(path);
+    }
+
+    private void NavigateTo(string path)
+    {
+        _error = null;
+        try
+        {
+            var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            _currentPath = full;
+            _parentPath = Browser.GetParent(full);
+            _atRoots = false;
+            _currentCount = null;
+
+            ShowListing(Browser.GetChildren(full));
+            _ = CountCurrentAsync(full, _probes!.Token);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    // The count for the folder we are standing in, shown in the toolbar.
+    private async Task CountCurrentAsync(string path, CancellationToken ct)
+    {
+        try
+        {
+            var count = await Browser.CountModelFilesAsync(path, ct);
+            if (ct.IsCancellationRequested || _currentPath != path) return;
+
+            _currentCount = count;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private void GoUp()
+    {
+        if (_parentPath is null) ShowRoots();
+        else NavigateTo(_parentPath);
+    }
+
+    private void Select() => Dialog.Close(DialogResult.Ok(_currentPath));
+
+    private void Cancel() => Dialog.Cancel();
+
+    public void Dispose()
+    {
+        _probes?.Cancel();
+        _probes?.Dispose();
+    }
+}

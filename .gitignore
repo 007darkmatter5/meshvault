@@ -1,0 +1,15 @@
+bin/
+obj/
+data/
+*.user
+*.db
+*.db-shm
+*.db-wal
+.vs/
+.vscode/
+.idea/
+
+# Local run artifacts
+staging/
+keys/
+*.mvm

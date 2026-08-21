@@ -1,0 +1,79 @@
+@inject ModelEditor Editor
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(DesignerId is null ? "New designer" : "Edit designer")</MudText>
+    </TitleContent>
+
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudTextField @bind-Value="Name" Label="Name" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Immediate="true" AutoFocus="true" OnKeyDown="OnKeyDown"
+                          Error="@string.IsNullOrWhiteSpace(Name)"
+                          ErrorText="A name is required" />
+            <MudTextField @bind-Value="ProfileUrl" Label="Profile URL" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Immediate="true"
+                          Placeholder="makerworld.com/@@theirname"
+                          Error="@(_urlError is not null)" ErrorText="@_urlError"
+                          HelperText="Their page on MakerWorld, Printables, Patreon..." />
+            <MudTextField @bind-Value="Notes" Label="Notes" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Lines="3" Placeholder="Anything worth remembering about them" />
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="@(() => Dialog.Cancel())">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@string.IsNullOrWhiteSpace(Name)" OnClick="Save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+
+    /// <summary>Null when creating a new designer.</summary>
+    [Parameter] public int? DesignerId { get; set; }
+    [Parameter] public string Name { get; set; } = "";
+    [Parameter] public string ProfileUrl { get; set; } = "";
+    [Parameter] public string Notes { get; set; } = "";
+
+    private string? _urlError;
+    private string? _error;
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(Name)) await Save();
+    }
+
+    private async Task Save()
+    {
+        _urlError = null;
+        _error = null;
+
+        // An unparseable URL would otherwise be silently dropped on save.
+        if (!string.IsNullOrWhiteSpace(ProfileUrl) && SourceSites.Normalize(ProfileUrl) is null)
+        {
+            _urlError = "That does not look like a web address.";
+            return;
+        }
+
+        try
+        {
+            if (DesignerId is { } id)
+                await Editor.UpdateDesignerAsync(id, Name, ProfileUrl, Notes);
+            else
+                await Editor.CreateDesignerAsync(Name, ProfileUrl, Notes);
+
+            Dialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            // Most often a duplicate name, which the user can fix in place.
+            _error = ex.Message;
+        }
+    }
+}

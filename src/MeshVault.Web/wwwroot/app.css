@@ -1,0 +1,239 @@
+/* MudBlazor supplies the design system; this file only covers the model grid,
+   the thumbnail placeholder, and a few truncation helpers. */
+
+html, body {
+    background: #14161a;
+}
+
+.topnav-link {
+    width: auto;
+    padding: 6px 14px !important;
+    border-radius: 8px;
+}
+.topnav-link .mud-nav-link-text { font-weight: 500; }
+
+/* Model grid --------------------------------------------------------------- */
+
+.model-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 16px;
+}
+
+.model-card { transition: border-color .12s ease, transform .12s ease; }
+.model-card:hover {
+    border-color: var(--mud-palette-primary) !important;
+    transform: translateY(-2px);
+}
+
+.model-card-link {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+}
+.model-card-link:hover { text-decoration: none; }
+.model-card-link:focus-visible {
+    outline: 2px solid var(--mud-palette-primary);
+    outline-offset: 2px;
+    border-radius: 8px;
+}
+
+.model-thumb {
+    position: relative;
+    aspect-ratio: 4 / 3;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(145deg, #232830, #1a1e25);
+    border-bottom: 1px solid var(--mud-palette-lines-default);
+    color: #39414d;
+}
+
+.model-thumb-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* 3D viewer -------------------------------------------------------------- */
+
+.viewer { position: relative; }
+
+.viewer-canvas {
+    width: 100%;
+    height: 380px;
+    display: block;
+    border-radius: 8px;
+    background: #1a1e25;
+    cursor: grab;
+    touch-action: none;
+}
+.viewer-canvas:active { cursor: grabbing; }
+
+.viewer-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    pointer-events: none;
+}
+
+.viewer-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+
+.model-thumb-count {
+    position: absolute;
+    right: 8px;
+    bottom: 6px;
+    font-size: .7rem;
+    font-weight: 600;
+    color: var(--mud-palette-text-secondary);
+    background: rgba(0, 0, 0, .45);
+    border-radius: 4px;
+    padding: 1px 6px;
+}
+
+.model-title {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.path-cell {
+    display: inline-block;
+    max-width: 420px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ui-monospace, monospace;
+    vertical-align: middle;
+}
+
+/* Blazor error UI ---------------------------------------------------------- */
+
+#blazor-error-ui {
+    background: #ffefc2;
+    color: #1a1a1a;
+    bottom: 0;
+    display: none;
+    left: 0;
+    padding: .8rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 20000;
+}
+#blazor-error-ui .dismiss { cursor: pointer; position: absolute; right: .75rem; top: .5rem; }
+
+/* Sign-in pages ---------------------------------------------------------- */
+
+.auth-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: var(--mud-palette-background, #14161a);
+}
+
+.auth-card {
+    width: 100%;
+    max-width: 420px;
+    background: var(--mud-palette-surface, #1c1f25);
+    border: 1px solid var(--mud-palette-lines-default, #2e333d);
+    border-radius: 10px;
+    padding: 32px;
+}
+
+.auth-brand {
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: -.02em;
+    margin-bottom: 24px;
+}
+.auth-brand span { color: var(--mud-palette-primary, #4a9eff); }
+
+.auth-field { margin-bottom: 16px; }
+.auth-field label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: .8rem;
+    color: var(--mud-palette-text-secondary, #8b93a1);
+}
+
+.auth-input {
+    width: 100%;
+    padding: 10px 12px;
+    background: #22262e;
+    border: 1px solid var(--mud-palette-lines-default, #2e333d);
+    border-radius: 8px;
+    color: var(--mud-palette-text-primary, #e6e8ec);
+    font: inherit;
+}
+.auth-input:focus { outline: none; border-color: var(--mud-palette-primary, #4a9eff); }
+
+.auth-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0 20px;
+    font-size: .875rem;
+    cursor: pointer;
+}
+
+.auth-submit {
+    width: 100%;
+    padding: 11px;
+    background: var(--mud-palette-primary, #4a9eff);
+    border: none;
+    border-radius: 8px;
+    color: #fff;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+.auth-submit:hover { filter: brightness(1.1); }
+
+.auth-alt {
+    margin-top: 20px;
+    text-align: center;
+    font-size: .875rem;
+    color: var(--mud-palette-text-secondary, #8b93a1);
+}
+
+/* Validation messages from EditForm. */
+.validation-message { color: #e05252; font-size: .8rem; display: block; margin-top: 4px; }
+
+/* Sign-out has to be a form post, styled to sit in the menu like an item. */
+.logout-form { margin: 0; }
+.logout-button {
+    width: 100%;
+    padding: 6px 16px;
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.logout-button:hover { background: rgba(255, 255, 255, .07); }
+
+.topbar-account {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    color: var(--mud-palette-text-primary, #e6e8ec);
+    text-decoration: none;
+    font-size: .9rem;
+}
+.topbar-account:hover { background: rgba(255, 255, 255, .07); text-decoration: none; }

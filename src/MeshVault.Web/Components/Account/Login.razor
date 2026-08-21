@@ -1,0 +1,110 @@
+@page "/login"
+@layout MeshVault.Web.Components.Account.AccountLayout
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Identity
+@inject SignInManager<ApplicationUser> SignIn
+@inject AccountSetup Accounts
+@inject NavigationManager Nav
+
+@* Static server rendering on purpose: signing in writes a cookie, which an
+   interactive circuit cannot do because its response has already been sent. *@
+
+<PageTitle>Sign in - MeshVault</PageTitle>
+
+<div class="auth-card">
+    <div class="auth-brand">Mesh<span>Vault</span></div>
+
+    @if (_unclaimed)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-4">
+            Nobody has claimed this MeshVault yet.
+            <MudLink Href="/register">Create the first account</MudLink> to become its administrator.
+        </MudAlert>
+    }
+
+    <EditForm Model="Input" method="post" OnValidSubmit="SubmitAsync" FormName="login">
+        <DataAnnotationsValidator />
+
+        <MudText Typo="Typo.h6" Class="mb-4">Sign in</MudText>
+
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-4">@_error</MudAlert>
+        }
+
+        <div class="auth-field">
+            <label for="username">User name</label>
+            <InputText id="username" @bind-Value="Input.UserName" class="auth-input" autocomplete="username" />
+            <ValidationMessage For="() => Input.UserName" />
+        </div>
+
+        <div class="auth-field">
+            <label for="password">Password</label>
+            <InputText id="password" @bind-Value="Input.Password" type="password"
+                       class="auth-input" autocomplete="current-password" />
+            <ValidationMessage For="() => Input.Password" />
+        </div>
+
+        <label class="auth-check">
+            <InputCheckbox @bind-Value="Input.RememberMe" />
+            <span>Stay signed in on this device</span>
+        </label>
+
+        <button type="submit" class="auth-submit">Sign in</button>
+    </EditForm>
+
+    @if (_registrationOpen && !_unclaimed)
+    {
+        <p class="auth-alt">No account? <a href="/register">Create one</a></p>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromForm] private LoginInput Input { get; set; } = default!;
+    [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
+
+    private string? _error;
+    private bool _unclaimed;
+    private bool _registrationOpen;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // The form post supplies this; it is null on the first GET.
+        Input ??= new LoginInput();
+
+        _unclaimed = await Accounts.IsUnclaimedAsync();
+        _registrationOpen = await Accounts.RegistrationAllowedAsync();
+    }
+
+    private async Task SubmitAsync()
+    {
+        var result = await SignIn.PasswordSignInAsync(
+            Input.UserName, Input.Password, Input.RememberMe, lockoutOnFailure: true);
+
+        if (result.Succeeded)
+        {
+            // Only same-site paths, so a crafted ReturnUrl cannot bounce the
+            // user to another host after signing in.
+            var destination = !string.IsNullOrEmpty(ReturnUrl) && ReturnUrl.StartsWith('/')
+                ? ReturnUrl
+                : "/";
+            Nav.NavigateTo(destination, forceLoad: true);
+            return;
+        }
+
+        _error = result.IsLockedOut
+            ? "Too many attempts. Try again shortly."
+            : "That user name and password do not match.";
+    }
+
+    private sealed class LoginInput
+    {
+        [Required(ErrorMessage = "Enter your user name.")]
+        public string UserName { get; set; } = "";
+
+        [Required(ErrorMessage = "Enter your password.")]
+        public string Password { get; set; } = "";
+
+        public bool RememberMe { get; set; } = true;
+    }
+}

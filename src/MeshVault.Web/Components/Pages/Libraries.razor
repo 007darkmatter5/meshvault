@@ -1,0 +1,329 @@
+@page "/libraries"
+@attribute [Authorize(Policy = Policies.Admin)]
+@rendermode InteractiveServer
+@implements IDisposable
+@inject ModelCatalog Catalog
+@inject ModelEditor Editor
+@inject ScanService Scans
+@inject ImportService Imports
+@inject ThumbnailService Thumbs
+@inject DirectoryBrowser Browser
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Libraries - MeshVault</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-1">Libraries</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
+    Folders MeshVault scans. Files are indexed where they are and never moved unless you allow it.
+</MudText>
+
+@if (_thumbs.Remaining > 0 || _thumbs.Current is not null || Thumbs.IsPaused)
+{
+    <MudPaper Outlined="true" Class="pa-4 mb-4">
+        <div class="d-flex align-center gap-3">
+            @if (Thumbs.IsPaused)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.PauseCircle" Color="Color.Warning" />
+            }
+            else
+            {
+                <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+            }
+
+            <div class="flex-grow-1">
+                <MudText Typo="Typo.body2">
+                    @(Thumbs.IsPaused ? "Preview building paused" : "Building previews")
+                    &mdash; @_thumbs.Done.ToString("N0") done@(_thumbs.Failed > 0 ? $", {_thumbs.Failed:N0} failed" : ""),
+                    @_thumbs.Remaining.ToString("N0") to go
+                </MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    @if (Thumbs.IsPaused)
+                    {
+                        <text>
+                            The library share is free for you. Opening a model still builds its
+                            preview on demand, so you can set images by hand.
+                        </text>
+                    }
+                    else
+                    {
+                        <text>
+                            @(_thumbs.Current ?? "working...") &mdash; reads every model once, and
+                            steps aside while you are using the app.
+                        </text>
+                    }
+                </MudText>
+            </div>
+
+            <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                       Color="@(Thumbs.IsPaused ? Color.Primary : Color.Default)"
+                       StartIcon="@(Thumbs.IsPaused ? Icons.Material.Filled.PlayArrow : Icons.Material.Filled.Pause)"
+                       OnClick="TogglePreviewBuilding">
+                @(Thumbs.IsPaused ? "Resume" : "Pause")
+            </MudButton>
+        </div>
+
+        @if (!Thumbs.IsPaused && _thumbs.Done + _thumbs.Remaining > 0)
+        {
+            <MudProgressLinear Color="Color.Primary" Class="mt-3"
+                               Value="@(100.0 * _thumbs.Done / (_thumbs.Done + _thumbs.Remaining))" />
+        }
+    </MudPaper>
+}
+
+@if (_stats is not null)
+{
+    <MudGrid Class="mb-6" Spacing="3">
+        <MudItem xs="6" sm="3"><StatCard Value="@_stats.Models.ToString("N0")" Label="Models" Icon="@Icons.Material.Filled.ViewInAr" /></MudItem>
+        <MudItem xs="6" sm="3"><StatCard Value="@_stats.Files.ToString("N0")" Label="Files" Icon="@Icons.Material.Filled.Description" /></MudItem>
+        <MudItem xs="6" sm="3"><StatCard Value="@Formats.Bytes(_stats.TotalBytes)" Label="On disk" Icon="@Icons.Material.Filled.Storage" /></MudItem>
+        <MudItem xs="6" sm="3"><StatCard Value="@_stats.Libraries.ToString()" Label="Libraries" Icon="@Icons.Material.Filled.FolderOpen" /></MudItem>
+    </MudGrid>
+}
+
+<MudPaper Outlined="true" Class="mb-6">
+    <MudTable Items="_libraries" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm">
+        <HeaderContent>
+            <MudTh>Name</MudTh>
+            <MudTh>Path</MudTh>
+            <MudTh>Mode</MudTh>
+            <MudTh>Last scan</MudTh>
+            <MudTh Style="text-align:right">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Name">
+                <MudText Typo="Typo.body2" Style="font-weight:600">@context.Name</MudText>
+            </MudTd>
+            <MudTd DataLabel="Path">
+                <MudTooltip Text="@context.Path">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary path-cell">@context.Path</MudText>
+                </MudTooltip>
+            </MudTd>
+            <MudTd DataLabel="Mode">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                         Color="@(context.AllowOrganize ? Color.Warning : Color.Default)">
+                    @(context.AllowOrganize ? "Organize allowed" : "Read-only")
+                </MudChip>
+            </MudTd>
+            <MudTd DataLabel="Last scan">
+                @if (Scans.IsRunning(context.Id) || Imports.IsRunning(context.Id))
+                {
+                    var running = Imports.IsRunning(context.Id)
+                        ? Imports.GetStatus(context.Id)?.Message ?? "Importing..."
+                        : Scans.GetStatus(context.Id)?.Message ?? "Scanning...";
+                    <div class="d-flex align-center gap-2">
+                        <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+                        <MudText Typo="Typo.caption">@running</MudText>
+                    </div>
+                }
+                else
+                {
+                    <MudText Typo="Typo.caption">@Formats.Ago(context.LastScannedUtc)</MudText>
+                    @if (Scans.GetStatus(context.Id)?.Message is { } message)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@message</MudText>
+                    }
+                    @if (Imports.GetStatus(context.Id)?.Message is { } imported)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                            Import: @imported
+                        </MudText>
+                    }
+                }
+            </MudTd>
+            <MudTd Style="text-align:right">
+                <MudTooltip Text="Import titles and tags from datapackage.json sidecars">
+                    <MudIconButton Icon="@Icons.Material.Filled.Downloading" Size="Size.Small"
+                                   Disabled="@(Imports.IsRunning(context.Id) || Scans.IsRunning(context.Id))"
+                                   OnClick="@(() => Import(context.Id))" />
+                </MudTooltip>
+                <MudTooltip Text="Rescan this library">
+                    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small"
+                                   Disabled="@Scans.IsRunning(context.Id)"
+                                   OnClick="@(() => Scan(context.Id))" />
+                </MudTooltip>
+                <MudTooltip Text="Remove from MeshVault (files are left alone)">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => ConfirmRemove(context))" />
+                </MudTooltip>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                No libraries yet. Add the folder your models live in below.
+            </MudText>
+        </NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+<MudPaper Outlined="true" Class="pa-5" Style="max-width:720px">
+    <MudText Typo="Typo.h6" Class="mb-4">Add a library</MudText>
+
+    <MudStack Spacing="4">
+        <MudTextField @bind-Value="_newPath" Label="Folder path" Variant="Variant.Outlined"
+                      Margin="Margin.Dense" Immediate="true"
+                      Placeholder="@PathPlaceholder"
+                      Adornment="Adornment.End"
+                      AdornmentIcon="@Icons.Material.Filled.FolderOpen"
+                      AdornmentAriaLabel="Browse for a folder"
+                      OnAdornmentClick="BrowseForFolder"
+                      HelperText="@_pathHelper"
+                      Error="@_pathInvalid" />
+
+        <MudTextField @bind-Value="_newName" Label="Name (optional)" Variant="Variant.Outlined"
+                      Margin="Margin.Dense" Placeholder="Defaults to the folder name" />
+
+        <MudSwitch @bind-Value="_allowOrganize" Color="Color.Warning"
+                   Label="Allow MeshVault to move and rename files in this folder" />
+
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+        }
+
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   Disabled="@(string.IsNullOrWhiteSpace(_newPath) || _adding)"
+                   OnClick="Add" Class="align-self-start">
+            @(_adding ? "Adding..." : "Add library")
+        </MudButton>
+    </MudStack>
+</MudPaper>
+
+@code {
+    private List<Library> _libraries = [];
+    private CatalogStats? _stats;
+    private ThumbnailProgress _thumbs = new(0, 0, 0, null);
+    private string _newPath = "";
+    private string _newName = "";
+    private bool _allowOrganize;
+    private bool _adding;
+    private string? _error;
+
+    private static string PathPlaceholder =>
+        OperatingSystem.IsWindows() ? @"D:\Models" : "/mnt/models";
+
+    private bool _pathInvalid => !string.IsNullOrWhiteSpace(_newPath) && !Browser.Exists(_newPath);
+
+    private string _pathHelper => _pathInvalid
+        ? "That folder does not exist on the machine running MeshVault."
+        : "Browse, or type a path on the machine running MeshVault.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Scans.Changed += OnScansChanged;
+        Imports.Changed += OnScansChanged;
+        Thumbs.Changed += OnScansChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _libraries = await Catalog.GetLibrariesAsync();
+        _stats = await Catalog.GetStatsAsync();
+        _thumbs = Thumbs.Progress;
+    }
+
+    // Scans finish on a background task, so hop back to the render thread.
+    private void OnScansChanged() => _ = InvokeAsync(async () =>
+    {
+        try
+        {
+            await LoadAsync();
+            StateHasChanged();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Circuit went away mid-scan; nothing left to update.
+        }
+        catch (Exception ex)
+        {
+            // Without this the refresh fails silently and the row stays on
+            // "Scanning..." forever.
+            _error = $"Could not refresh library status: {ex.Message}";
+            StateHasChanged();
+        }
+    });
+
+    private async Task BrowseForFolder()
+    {
+        var parameters = new DialogParameters<FolderPickerDialog>
+        {
+            { x => x.StartPath, string.IsNullOrWhiteSpace(_newPath) ? null : _newPath },
+        };
+
+        var dialog = await Dialogs.ShowAsync<FolderPickerDialog>("Choose a folder", parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: string picked } && !string.IsNullOrWhiteSpace(picked))
+        {
+            _newPath = picked;
+            _error = null;
+        }
+    }
+
+    private void Scan(int libraryId)
+    {
+        if (Scans.TryStart(libraryId))
+            Snackbar.Add("Scan started", Severity.Info);
+    }
+
+    private async Task Add()
+    {
+        _error = null;
+        _adding = true;
+        try
+        {
+            var library = await Editor.AddLibraryAsync(_newName, _newPath, _allowOrganize);
+            _newPath = _newName = "";
+            _allowOrganize = false;
+            await LoadAsync();
+            Scans.TryStart(library.Id);
+            Snackbar.Add($"Added {library.Name}, scanning now", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _adding = false;
+        }
+    }
+
+    private async Task ConfirmRemove(Library library)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync(
+            "Remove library?",
+            $"{library.Name} and its catalog entries will be removed from MeshVault. " +
+            "Nothing on disk is deleted.",
+            yesText: "Remove", noText: null, cancelText: "Cancel");
+
+        if (confirmed != true) return;
+
+        await Editor.RemoveLibraryAsync(library.Id);
+        await LoadAsync();
+        Snackbar.Add($"Removed {library.Name}", Severity.Info);
+    }
+
+    private async Task TogglePreviewBuilding()
+    {
+        await Thumbs.SetPausedAsync(!Thumbs.IsPaused);
+        Snackbar.Add(
+            Thumbs.IsPaused ? "Preview building paused" : "Preview building resumed",
+            Severity.Info);
+    }
+
+    private void Import(int libraryId)
+    {
+        if (Imports.TryStart(libraryId))
+            Snackbar.Add("Reading datapackage.json sidecars", Severity.Info);
+    }
+
+    public void Dispose()
+    {
+        Scans.Changed -= OnScansChanged;
+        Imports.Changed -= OnScansChanged;
+        Thumbs.Changed -= OnScansChanged;
+    }
+}

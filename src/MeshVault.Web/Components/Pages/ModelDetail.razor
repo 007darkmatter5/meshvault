@@ -1,0 +1,423 @@
+@page "/model/{Id:int}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject ModelCatalog Catalog
+@inject ModelEditor Editor
+@inject ISnackbar Snackbar
+
+<PageTitle>@(_model?.Name ?? "Model") - MeshVault</PageTitle>
+
+@if (_card is null)
+{
+    @if (_loaded)
+    {
+        <MudAlert Severity="Severity.Warning">Model not found.</MudAlert>
+    }
+    else
+    {
+        <MudSkeleton Height="120px" />
+    }
+}
+else
+{
+    <div class="d-flex align-center gap-3 mb-1">
+        <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Href="/browse" Size="Size.Small" />
+
+        @if (_editingName)
+        {
+            <MudTextField @bind-Value="_nameDraft" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Immediate="true" AutoFocus="true" Class="flex-grow-1"
+                          OnKeyDown="OnNameKeyDown" Label="Model name" />
+            <MudIconButton Icon="@Icons.Material.Filled.Check" Color="Color.Primary"
+                           Disabled="@string.IsNullOrWhiteSpace(_nameDraft)"
+                           OnClick="SaveName" title="Save name" />
+            <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="CancelRename" title="Cancel" />
+        }
+        else
+        {
+            <MudText Typo="Typo.h5" Class="flex-grow-1">@_model!.Name</MudText>
+            <MudTooltip Text="Rename this model">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="StartRename" />
+            </MudTooltip>
+            @if (_model!.NameSetByUser)
+            {
+                <MudTooltip Text="Renamed by you. Reset to use the folder name again.">
+                    <MudIconButton Icon="@Icons.Material.Filled.Restore" Size="Size.Small"
+                                   OnClick="ResetName" />
+                </MudTooltip>
+            }
+        }
+        @if (_model!.SourceUrl is not null)
+        {
+            <MudButton Href="@_model.SourceUrl" Target="_blank" Size="Size.Small"
+                       Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.OpenInNew">
+                @(_model.SourceSite ?? "Source")
+            </MudButton>
+        }
+        <MudTooltip Text="@(_card.IsFavorite ? "Remove from favorites" : "Add to favorites")">
+            <MudIconButton Icon="@(_card.IsFavorite ? Icons.Material.Filled.Star : Icons.Material.Filled.StarBorder)"
+                           Color="@(_card.IsFavorite ? Color.Warning : Color.Default)"
+                           OnClick="ToggleFavorite" />
+        </MudTooltip>
+    </div>
+
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-6" Style="font-family:ui-monospace,monospace">
+        @_model.Library?.Name / @_model.RelativePath
+    </MudText>
+
+    <MudGrid Spacing="4">
+        <MudItem xs="12" md="7" lg="8">
+            @if (PreviewableFiles.Count > 0)
+            {
+                <MudPaper Outlined="true" Class="pa-4 mb-4">
+                    <MudText Typo="Typo.overline" Class="mud-text-secondary">Preview</MudText>
+                    <div class="mt-2">
+                        <ModelViewer ModelId="_model.Id" Files="PreviewableFiles"
+                                     OnSnapshotSaved="OnSnapshotSaved" @key="_model.Id" />
+                    </div>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
+                        Drag to rotate, right-drag to pan, scroll to zoom. "Set as image" uses the angle you are looking at.
+                    </MudText>
+                </MudPaper>
+            }
+
+            <MudPaper Outlined="true" Class="pa-4">
+                <MudText Typo="Typo.overline" Class="mud-text-secondary">Files</MudText>
+                <MudTable Items="OrderedFiles" Dense="true" Hover="true" Elevation="0"
+                          Breakpoint="Breakpoint.Sm" Class="mt-2">
+                    <HeaderContent>
+                        <MudTh>Name</MudTh>
+                        <MudTh>Kind</MudTh>
+                        <MudTh Style="text-align:right">Size</MudTh>
+                        <MudTh>Modified</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Name">
+                            <MudTooltip Text="@context.RelativePath">
+                                <MudText Typo="Typo.caption" Style="font-family:ui-monospace,monospace">
+                                    @context.FileName
+                                </MudText>
+                            </MudTooltip>
+                        </MudTd>
+                        <MudTd DataLabel="Kind">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                     Color="@KindColor(context.Kind)" Class="ma-0">@context.Kind</MudChip>
+                        </MudTd>
+                        <MudTd DataLabel="Size" Style="text-align:right">
+                            <MudText Typo="Typo.caption">@Formats.Bytes(context.SizeBytes)</MudText>
+                        </MudTd>
+                        <MudTd DataLabel="Modified">
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                @context.ModifiedUtc.LocalDateTime.ToString("d MMM yyyy")
+                            </MudText>
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            </MudPaper>
+
+            <MudPaper Outlined="true" Class="pa-4 mt-4">
+                <MudText Typo="Typo.overline" Class="mud-text-secondary">Notes</MudText>
+                <MudTextField @bind-Value="_notes" Lines="6" Variant="Variant.Outlined" Immediate="true"
+                              Margin="Margin.Dense" Class="my-2"
+                              Placeholder="Print settings, supports, what worked..." />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                           Disabled="@(!NotesChanged)" OnClick="SaveNotes">Save notes</MudButton>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="5" lg="4">
+            <MudPaper Outlined="true" Class="pa-4 mb-4">
+                <MudText Typo="Typo.overline" Class="mud-text-secondary">Source</MudText>
+
+                <MudAutocomplete T="string" Value="_designerName" ValueChanged="SetDesigner"
+                                 SearchFunc="SearchDesigners" Label="Designer" Variant="Variant.Outlined"
+                                 Margin="Margin.Dense" Class="mt-2" Clearable="true" CoerceValue="true"
+                                 HelperText="Type a new name to create them" />
+
+                <MudTextField @bind-Value="_sourceUrl" Label="Source URL" Variant="Variant.Outlined"
+                              Margin="Margin.Dense" Class="mt-3" Immediate="true"
+                              Placeholder="makerworld.com/models/..."
+                              Error="@(_sourceError is not null)" ErrorText="@_sourceError"
+                              HelperText="Where you downloaded it from" />
+
+                <MudTextField @bind-Value="_license" Label="License" Variant="Variant.Outlined"
+                              Margin="Margin.Dense" Class="mt-3" Immediate="true"
+                              Placeholder="CC BY-NC 4.0" />
+
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" Class="mt-3"
+                           Disabled="@(!SourceChanged)" OnClick="SaveSource">Save source</MudButton>
+            </MudPaper>
+
+            <MudPaper Outlined="true" Class="pa-4 mb-4">
+                <MudText Typo="Typo.overline" Class="mud-text-secondary">Tags</MudText>
+                <div class="d-flex flex-wrap gap-1 my-2">
+                    @foreach (var tag in _model.Tags.OrderBy(t => t.Name))
+                    {
+                        var tagId = tag.Id;
+                        <MudChip T="string" Size="Size.Small" Class="ma-0" Color="Color.Primary"
+                                 Variant="Variant.Outlined" OnClose="@(() => RemoveTag(tagId))">
+                            @tag.Name
+                        </MudChip>
+                    }
+                    @if (_model.Tags.Count == 0)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">No tags yet.</MudText>
+                    }
+                </div>
+                <MudAutocomplete T="string" Value="_newTag" ValueChanged="AddTag" SearchFunc="SearchTags"
+                                 Placeholder="Add a tag..." Variant="Variant.Outlined" Margin="Margin.Dense"
+                                 CoerceValue="true" Clearable="true" />
+            </MudPaper>
+
+            <MudPaper Outlined="true" Class="pa-4 mb-4">
+                <div class="d-flex align-center justify-space-between">
+                    <MudText Typo="Typo.overline" Class="mud-text-secondary">Collections</MudText>
+                    <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small"
+                                   OnClick="CreateCollectionInline" title="New collection" />
+                </div>
+                @if (_allCollections.Count == 0)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        No collections yet. Create one to group models.
+                    </MudText>
+                }
+                else
+                {
+                    @foreach (var entry in _allCollections)
+                    {
+                        var collectionId = entry.Collection.Id;
+                        var isMember = _model.Collections.Any(c => c.Id == collectionId);
+                        <MudCheckBox T="bool" Value="isMember" Dense="true" Size="Size.Small"
+                                     ValueChanged="@(v => SetCollection(collectionId, v))"
+                                     Label="@entry.Collection.Name" />
+                    }
+                }
+                @if (_newCollection is not null)
+                {
+                    <div class="d-flex gap-2 align-center mt-2">
+                        <MudTextField @bind-Value="_newCollection" Placeholder="Collection name"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
+                                      OnKeyDown="OnNewCollectionKeyDown" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Check" Color="Color.Primary"
+                                       Size="Size.Small" OnClick="SaveNewCollection" />
+                    </div>
+                }
+            </MudPaper>
+
+            <MudPaper Outlined="true" Class="pa-4">
+                <MudText Typo="Typo.overline" Class="mud-text-secondary">Details</MudText>
+                <MudSimpleTable Dense="true" Elevation="0" Class="mt-2">
+                    <tbody>
+                        <tr><td class="mud-text-secondary">Size</td><td>@Formats.Bytes(_model.TotalBytes)</td></tr>
+                        <tr><td class="mud-text-secondary">Files</td><td>@_model.Files.Count</td></tr>
+                        <tr><td class="mud-text-secondary">Added</td><td>@Formats.Ago(_model.AddedUtc)</td></tr>
+                        <tr><td class="mud-text-secondary">Modified</td><td>@Formats.Ago(_model.FileModifiedUtc)</td></tr>
+                    </tbody>
+                </MudSimpleTable>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private ModelCard? _card;
+    private ModelEntry? _model => _card?.Model;
+    private bool _loaded;
+    private List<(Collection Collection, int Count)> _allCollections = [];
+
+    private string _newTag = "";
+    private string _notes = "";
+    private string _originalNotes = "";
+    private string _designerName = "";
+    private string _sourceUrl = "";
+    private string _originalSourceUrl = "";
+    private string _license = "";
+    private string _originalLicense = "";
+    private string? _sourceError;
+    private string? _newCollection;
+    private bool _editingName;
+    private string _nameDraft = "";
+
+    private bool NotesChanged => _notes != _originalNotes;
+    private bool SourceChanged => _sourceUrl != _originalSourceUrl || _license != _originalLicense;
+
+    private IEnumerable<ModelFile> OrderedFiles =>
+        _model!.Files.OrderBy(f => f.Kind).ThenBy(f => f.FileName);
+
+    /// <summary>Files the browser viewer can actually render, largest first.</summary>
+    private List<ModelFile> PreviewableFiles =>
+        _model!.Files
+            .Where(f => MeshLoader.CanRead(f.Extension))
+            .OrderByDescending(f => f.SizeBytes)
+            .ToList();
+
+    private async Task OnSnapshotSaved() => await LoadAsync();
+
+    // Renaming --------------------------------------------------------------
+
+    private void StartRename()
+    {
+        _nameDraft = _model!.Name;
+        _editingName = true;
+    }
+
+    private void CancelRename() => _editingName = false;
+
+    private async Task OnNameKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SaveName();
+        else if (e.Key == "Escape") CancelRename();
+    }
+
+    private async Task SaveName()
+    {
+        if (_model is null || string.IsNullOrWhiteSpace(_nameDraft)) return;
+
+        await Editor.RenameAsync(_model.Id, _nameDraft);
+        _editingName = false;
+        await LoadAsync();
+        Snackbar.Add("Name saved", Severity.Success);
+    }
+
+    private async Task ResetName()
+    {
+        if (_model is null) return;
+
+        await Editor.ResetNameAsync(_model.Id);
+        await LoadAsync();
+        Snackbar.Add("Name reset to the folder name", Severity.Info);
+    }
+
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _card = await Catalog.GetAsync(Id);
+        _allCollections = await Catalog.GetCollectionsAsync();
+        _loaded = true;
+
+        if (_model is null) return;
+        _notes = _originalNotes = _model.Notes ?? "";
+        _sourceUrl = _originalSourceUrl = _model.SourceUrl ?? "";
+        _license = _originalLicense = _model.License ?? "";
+        _designerName = _model.Designer?.Name ?? "";
+    }
+
+    private static Color KindColor(FileKind kind) => kind switch
+    {
+        FileKind.Mesh => Color.Primary,
+        FileKind.Cad => Color.Secondary,
+        FileKind.Sliced => Color.Success,
+        FileKind.Image => Color.Warning,
+        _ => Color.Default,
+    };
+
+    private async Task ToggleFavorite()
+    {
+        if (_model is null) return;
+        await Editor.ToggleFavoriteAsync(_model.Id);
+        await LoadAsync();
+    }
+
+    // Tags ------------------------------------------------------------------
+
+    private async Task<IEnumerable<string>> SearchTags(string value, CancellationToken ct)
+    {
+        var tags = await Editor.SuggestTagsAsync(value ?? "", 10, ct);
+        return tags.Select(t => t.Name);
+    }
+
+    private async Task AddTag(string? value)
+    {
+        if (_model is null || string.IsNullOrWhiteSpace(value)) return;
+        await Editor.AddTagAsync(_model.Id, value);
+        _newTag = "";
+        await LoadAsync();
+    }
+
+    private async Task RemoveTag(int tagId)
+    {
+        if (_model is null) return;
+        await Editor.RemoveTagAsync(_model.Id, tagId);
+        await LoadAsync();
+    }
+
+    // Designer / source -----------------------------------------------------
+
+    private async Task<IEnumerable<string>> SearchDesigners(string value, CancellationToken ct)
+    {
+        var designers = await Editor.SuggestDesignersAsync(value ?? "", 10, ct);
+        return designers.Select(d => d.Name);
+    }
+
+    private async Task SetDesigner(string? name)
+    {
+        if (_model is null) return;
+        _designerName = name ?? "";
+        await Editor.SetDesignerAsync(_model.Id, _designerName);
+        await LoadAsync();
+        Snackbar.Add(string.IsNullOrWhiteSpace(_designerName) ? "Designer cleared" : $"Designer set to {_designerName}",
+            Severity.Success);
+    }
+
+    private async Task SaveSource()
+    {
+        if (_model is null) return;
+        _sourceError = null;
+
+        if (!await Editor.SetSourceUrlAsync(_model.Id, _sourceUrl))
+        {
+            _sourceError = "That does not look like a web address.";
+            return;
+        }
+
+        await Editor.SetLicenseAsync(_model.Id, _license);
+        await LoadAsync();
+        Snackbar.Add("Source saved", Severity.Success);
+    }
+
+    // Collections -----------------------------------------------------------
+
+    private void CreateCollectionInline() => _newCollection = "";
+
+    private async Task OnNewCollectionKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SaveNewCollection();
+    }
+
+    private async Task SaveNewCollection()
+    {
+        if (_model is null || string.IsNullOrWhiteSpace(_newCollection)) { _newCollection = null; return; }
+
+        try
+        {
+            var collection = await Editor.CreateCollectionAsync(_newCollection);
+            await Editor.SetCollectionMembershipAsync(_model.Id, collection.Id, true);
+            _newCollection = null;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task SetCollection(int collectionId, bool member)
+    {
+        if (_model is null) return;
+        await Editor.SetCollectionMembershipAsync(_model.Id, collectionId, member);
+        await LoadAsync();
+    }
+
+    // Notes -----------------------------------------------------------------
+
+    private async Task SaveNotes()
+    {
+        if (_model is null) return;
+        await Editor.SetNotesAsync(_model.Id, string.IsNullOrWhiteSpace(_notes) ? null : _notes);
+        _originalNotes = _notes;
+        Snackbar.Add("Notes saved", Severity.Success);
+    }
+}

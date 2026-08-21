@@ -1,0 +1,214 @@
+@page "/users"
+@attribute [Authorize(Policy = Policies.Admin)]
+@rendermode InteractiveServer
+@inject MeshVault.Web.Services.UserAdmin Admin
+@inject AccountSetup Accounts
+@inject AuthenticationStateProvider AuthState
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Accounts - MeshVault</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-1">
+    <MudText Typo="Typo.h5">Accounts</MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd"
+               OnClick="CreateUser">New account</MudButton>
+</div>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
+    Everyone who can sign in. Administrators manage libraries and accounts; members browse and keep
+    their own collections and favorites.
+</MudText>
+
+<MudPaper Outlined="true" Class="pa-4 mb-6">
+    <MudSwitch T="bool" Value="_registrationOpen" ValueChanged="SetRegistrationOpen" Color="Color.Warning"
+               Label="Let anyone who can reach this site create their own account" />
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+        Usually better to leave this off and add accounts here instead.
+    </MudText>
+</MudPaper>
+
+<MudPaper Outlined="true">
+    <MudTable Items="_users" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm"
+              Loading="_loading">
+        <HeaderContent>
+            <MudTh>Account</MudTh>
+            <MudTh>Role</MudTh>
+            <MudTh Style="text-align:right">Collections</MudTh>
+            <MudTh Style="text-align:right">Favorites</MudTh>
+            <MudTh>Created</MudTh>
+            <MudTh Style="text-align:right">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Account">
+                <div class="d-flex align-center gap-2">
+                    <MudText Typo="Typo.body2" Style="font-weight:600">@context.UserName</MudText>
+                    @if (context.Id == _currentUserId)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Class="ma-0">you</MudChip>
+                    }
+                    @if (context.IsLockedOut)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined"
+                                 Class="ma-0">suspended</MudChip>
+                    }
+                </div>
+                @if (context.DisplayName is not null || context.Email is not null)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        @context.DisplayName@(context.DisplayName is not null && context.Email is not null ? " · " : "")@context.Email
+                    </MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Role">
+                <MudSelect T="string" Value="@context.Role" Dense="true" Margin="Margin.Dense"
+                           Variant="Variant.Outlined" Style="max-width:140px"
+                           ValueChanged="@(role => ChangeRole(context, role))">
+                    @foreach (var role in Roles.All)
+                    {
+                        <MudSelectItem T="string" Value="@role">@role</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudTd>
+            <MudTd DataLabel="Collections" Style="text-align:right">@context.Collections</MudTd>
+            <MudTd DataLabel="Favorites" Style="text-align:right">@context.Favorites</MudTd>
+            <MudTd DataLabel="Created">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@Formats.Ago(context.CreatedUtc)</MudText>
+            </MudTd>
+            <MudTd Style="text-align:right">
+                <MudTooltip Text="Set a new password">
+                    <MudIconButton Icon="@Icons.Material.Filled.Password" Size="Size.Small"
+                                   OnClick="@(() => ResetPassword(context))" />
+                </MudTooltip>
+                <MudTooltip Text="@(context.IsLockedOut ? "Allow sign-in again" : "Suspend this account")">
+                    <MudIconButton Size="Size.Small"
+                                   Icon="@(context.IsLockedOut ? Icons.Material.Filled.LockOpen : Icons.Material.Filled.Lock)"
+                                   Disabled="@(context.Id == _currentUserId)"
+                                   OnClick="@(() => ToggleLock(context))" />
+                </MudTooltip>
+                <MudTooltip Text="Delete this account">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   Disabled="@(context.Id == _currentUserId)"
+                                   OnClick="@(() => Delete(context))" />
+                </MudTooltip>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">No accounts yet.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private List<UserSummary> _users = [];
+    private string? _currentUserId;
+    private bool _registrationOpen;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthState.GetAuthenticationStateAsync();
+        _currentUserId = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _users = await Admin.ListAsync();
+        _registrationOpen = await Accounts.RegistrationAllowedAsync();
+        _loading = false;
+    }
+
+    private async Task SetRegistrationOpen(bool open)
+    {
+        _registrationOpen = open;
+        await Accounts.SetRegistrationOpenAsync(open);
+        Snackbar.Add(open ? "Anyone can now sign up" : "Registration is closed", Severity.Info);
+    }
+
+    private async Task CreateUser()
+    {
+        var dialog = await Dialogs.ShowAsync<UserDialog>("New account");
+        if ((await dialog.Result) is { Canceled: false })
+        {
+            await LoadAsync();
+            Snackbar.Add("Account created", Severity.Success);
+        }
+    }
+
+    private async Task ChangeRole(UserSummary user, string role)
+    {
+        if (role == user.Role) return;
+
+        var result = await Admin.SetRoleAsync(user.Id, role);
+        if (!result.Succeeded)
+        {
+            Snackbar.Add(string.Join(" ", result.Errors.Select(e => e.Description)), Severity.Error);
+            // Put the dropdown back where it was.
+            await LoadAsync();
+            return;
+        }
+
+        await LoadAsync();
+        Snackbar.Add($"{user.UserName} is now a {role}", Severity.Success);
+    }
+
+    private async Task ResetPassword(UserSummary user)
+    {
+        var parameters = new DialogParameters<PasswordDialog> { { x => x.UserName, user.UserName } };
+        var dialog = await Dialogs.ShowAsync<PasswordDialog>("Set a new password", parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: string password })
+        {
+            var reset = await Admin.ResetPasswordAsync(user.Id, password);
+            if (!reset.Succeeded)
+            {
+                Snackbar.Add(string.Join(" ", reset.Errors.Select(e => e.Description)), Severity.Error);
+                return;
+            }
+
+            await LoadAsync();
+            Snackbar.Add($"Password set for {user.UserName}", Severity.Success);
+        }
+    }
+
+    private async Task ToggleLock(UserSummary user)
+    {
+        var result = await Admin.SetLockedOutAsync(user.Id, !user.IsLockedOut);
+        if (!result.Succeeded)
+        {
+            Snackbar.Add(string.Join(" ", result.Errors.Select(e => e.Description)), Severity.Error);
+            return;
+        }
+
+        await LoadAsync();
+        Snackbar.Add(user.IsLockedOut ? $"{user.UserName} can sign in again" : $"{user.UserName} suspended",
+            Severity.Info);
+    }
+
+    private async Task Delete(UserSummary user)
+    {
+        var owned = user.Collections + user.Favorites;
+        var confirmed = await Dialogs.ShowMessageBoxAsync(
+            $"Delete {user.UserName}?",
+            owned == 0
+                ? "The account will be removed. Models in the library are not affected."
+                : $"The account will be removed, along with its {user.Collections} collection(s) and "
+                  + $"{user.Favorites} favorite(s). Models in the library are not affected.",
+            yesText: "Delete", noText: null, cancelText: "Cancel");
+
+        if (confirmed != true) return;
+
+        var result = await Admin.DeleteAsync(user.Id, _currentUserId ?? "");
+        if (!result.Succeeded)
+        {
+            Snackbar.Add(string.Join(" ", result.Errors.Select(e => e.Description)), Severity.Error);
+            return;
+        }
+
+        await LoadAsync();
+        Snackbar.Add($"Deleted {user.UserName}", Severity.Info);
+    }
+}

@@ -1,0 +1,33 @@
+services:
+  meshvault:
+    image: ghcr.io/OWNER/meshvault:latest
+    # To build locally instead of pulling, comment out `image:` above and
+    # uncomment this:
+    # build: .
+    container_name: meshvault
+    restart: unless-stopped
+
+    ports:
+      - "8080:8080"
+
+    volumes:
+      # Database, thumbnails, viewer geometry and the data protection keys that
+      # keep people signed in across updates. Keep this on local/cache storage:
+      # SQLite over a network share is unreliable.
+      - ./data:/data
+
+      # Your model library. Read-only unless you want MeshVault to organise
+      # files for you; drop the ":ro" only if you do.
+      - /mnt/user/models:/models:ro
+
+    environment:
+      # Seeds the library on first run. After that it is managed in the UI.
+      - MeshVault__Libraries__0__Name=Models
+      - MeshVault__Libraries__0__Path=/models
+      - MeshVault__Libraries__0__AllowOrganize=false
+
+      # A full walk of a large library costs minutes; skip it if it was scanned
+      # this recently. Set to 0 to always rescan on start.
+      - MeshVault__RescanIntervalHours=12
+
+      - TZ=Etc/UTC

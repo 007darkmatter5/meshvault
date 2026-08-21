@@ -1,0 +1,23 @@
+# Keeps the build context small and, more importantly, keeps the local
+# database, thumbnails and staged model files out of the image.
+**/bin/
+**/obj/
+**/data/
+**/node_modules/
+
+.git/
+.github/
+.vs/
+.vscode/
+.idea/
+
+**/*.user
+**/*.db
+**/*.db-shm
+**/*.db-wal
+
+Dockerfile
+docker-compose*.yml
+README.md
+LICENSE
+unraid/

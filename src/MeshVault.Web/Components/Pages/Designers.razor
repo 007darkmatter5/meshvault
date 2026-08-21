@@ -1,0 +1,137 @@
+@page "/designers"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject ModelCatalog Catalog
+@inject ModelEditor Editor
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Designers - MeshVault</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-1">
+    <MudText Typo="Typo.h5">Designers</MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd"
+               OnClick="Create">New designer</MudButton>
+</div>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
+    Everyone whose models you have. Assign a designer from a model's page; they appear here automatically.
+</MudText>
+
+@if (_designers.Count == 0)
+{
+    <MudPaper Outlined="true" Class="pa-12 d-flex flex-column align-center gap-3">
+        <MudIcon Icon="@Icons.Material.Filled.People" Size="Size.Large" Class="mud-text-secondary" />
+        <MudText Typo="Typo.h6">No designers yet</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            Open a model and set its designer to start building this list.
+        </MudText>
+        <div class="d-flex gap-2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Create"
+                       StartIcon="@Icons.Material.Filled.PersonAdd">New designer</MudButton>
+            <MudButton Variant="Variant.Outlined" Href="/browse?missingDesigner=true">
+                Find models with no designer
+            </MudButton>
+        </div>
+    </MudPaper>
+}
+else
+{
+    <MudPaper Outlined="true">
+        <MudTable Items="_designers" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm">
+            <HeaderContent>
+                <MudTh>Name</MudTh>
+                <MudTh>Profile</MudTh>
+                <MudTh Style="text-align:right">Models</MudTh>
+                <MudTh Style="text-align:right">Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Name">
+                    <MudLink Href="@($"/browse?designerId={context.Designer.Id}")">
+                        <MudText Typo="Typo.body2" Style="font-weight:600">@context.Designer.Name</MudText>
+                    </MudLink>
+                    @if (!string.IsNullOrWhiteSpace(context.Designer.Notes))
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                            @context.Designer.Notes
+                        </MudText>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Profile">
+                    @if (context.Designer.ProfileUrl is { } url)
+                    {
+                        <MudLink Href="@url" Target="_blank">
+                            <MudText Typo="Typo.caption">@SourceSites.Detect(url)</MudText>
+                        </MudLink>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">&mdash;</MudText>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Models" Style="text-align:right">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">
+                        @context.Count
+                    </MudChip>
+                </MudTd>
+                <MudTd Style="text-align:right">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                   OnClick="@(() => Edit(context.Designer))" title="Edit designer" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => Delete(context.Designer, context.Count))" title="Delete designer" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+}
+
+@code {
+    private List<(Designer Designer, int Count)> _designers = [];
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync() => _designers = await Catalog.GetDesignersAsync();
+
+    private async Task Create()
+    {
+        var dialog = await Dialogs.ShowAsync<DesignerDialog>("New designer");
+        if ((await dialog.Result) is { Canceled: false })
+        {
+            await LoadAsync();
+            Snackbar.Add("Designer added", Severity.Success);
+        }
+    }
+
+    private async Task Edit(Designer designer)
+    {
+        var parameters = new DialogParameters<DesignerDialog>
+        {
+            { x => x.DesignerId, designer.Id },
+            { x => x.Name, designer.Name },
+            { x => x.ProfileUrl, designer.ProfileUrl ?? "" },
+            { x => x.Notes, designer.Notes ?? "" },
+        };
+
+        var dialog = await Dialogs.ShowAsync<DesignerDialog>("Edit designer", parameters);
+        if ((await dialog.Result) is { Canceled: false })
+        {
+            await LoadAsync();
+            Snackbar.Add("Designer updated", Severity.Success);
+        }
+    }
+
+    private async Task Delete(Designer designer, int count)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync(
+            "Delete designer?",
+            count == 0
+                ? $"{designer.Name} will be removed."
+                : $"{designer.Name} will be removed. Their {count} model(s) stay in the catalog and simply lose the designer link.",
+            yesText: "Delete", noText: null, cancelText: "Cancel");
+
+        if (confirmed != true) return;
+
+        await Editor.DeleteDesignerAsync(designer.Id);
+        await LoadAsync();
+        Snackbar.Add($"Deleted {designer.Name}", Severity.Info);
+    }
+}

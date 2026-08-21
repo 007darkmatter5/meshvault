@@ -1,0 +1,13 @@
+@page "/denied"
+@layout MeshVault.Web.Components.Layout.MainLayout
+
+<PageTitle>Not allowed - MeshVault</PageTitle>
+
+<MudPaper Outlined="true" Class="pa-12 d-flex flex-column align-center gap-3">
+    <MudIcon Icon="@Icons.Material.Filled.Lock" Size="Size.Large" Class="mud-text-secondary" />
+    <MudText Typo="Typo.h6">That area is for administrators</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+        Your account can browse and organise models, but not manage libraries or accounts.
+    </MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="/browse">Back to browsing</MudButton>
+</MudPaper>

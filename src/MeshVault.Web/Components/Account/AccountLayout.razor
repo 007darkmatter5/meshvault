@@ -1,0 +1,8 @@
+@inherits LayoutComponentBase
+
+@* Deliberately plain and static: the sign-in pages must render without a
+   circuit so their form posts map correctly and can write an auth cookie. *@
+
+<div class="auth-page">
+    @Body
+</div>

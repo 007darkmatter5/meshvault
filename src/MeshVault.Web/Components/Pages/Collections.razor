@@ -1,0 +1,121 @@
+@page "/collections"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject ModelCatalog Catalog
+@inject ModelEditor Editor
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Collections - MeshVault</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-1">
+    <MudText Typo="Typo.h5">Collections</MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="Create">New collection</MudButton>
+</div>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
+    Your own groupings of models &mdash; a print queue, a project, a gift list. Collections are private to you.
+</MudText>
+
+@if (_collections.Count == 0)
+{
+    <MudPaper Outlined="true" Class="pa-12 d-flex flex-column align-center gap-3">
+        <MudIcon Icon="@Icons.Material.Filled.CollectionsBookmark" Size="Size.Large" Class="mud-text-secondary" />
+        <MudText Typo="Typo.h6">No collections yet</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            Create one, then add models to it from their pages.
+        </MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Create"
+                   StartIcon="@Icons.Material.Filled.Add">New collection</MudButton>
+    </MudPaper>
+}
+else
+{
+    <MudGrid Spacing="3">
+        @foreach (var entry in _collections)
+        {
+            <MudItem xs="12" sm="6" md="4">
+                <MudCard Outlined="true" Style="height:100%">
+                    <MudCardContent>
+                        <div class="d-flex align-center justify-space-between">
+                            <MudLink Href="@($"/browse?collectionId={entry.Collection.Id}")">
+                                <MudText Typo="Typo.h6">@entry.Collection.Name</MudText>
+                            </MudLink>
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">
+                                @entry.Count
+                            </MudChip>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(entry.Collection.Description))
+                        {
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1">
+                                @entry.Collection.Description
+                            </MudText>
+                        }
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+                            Created @Formats.Ago(entry.Collection.CreatedUtc)
+                        </MudText>
+                    </MudCardContent>
+                    <MudCardActions>
+                        <MudButton Size="Size.Small" Href="@($"/browse?collectionId={entry.Collection.Id}")">
+                            View models
+                        </MudButton>
+                        <MudSpacer />
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                       OnClick="@(() => Rename(entry.Collection))" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => Delete(entry.Collection, entry.Count))" />
+                    </MudCardActions>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+@code {
+    private List<(Collection Collection, int Count)> _collections = [];
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync() => _collections = await Catalog.GetCollectionsAsync();
+
+    private async Task Create()
+    {
+        var dialog = await Dialogs.ShowAsync<CollectionDialog>("New collection");
+        if ((await dialog.Result) is { Canceled: false })
+        {
+            await LoadAsync();
+            Snackbar.Add("Collection created", Severity.Success);
+        }
+    }
+
+    private async Task Rename(Collection collection)
+    {
+        var parameters = new DialogParameters<CollectionDialog>
+        {
+            { x => x.CollectionId, collection.Id },
+            { x => x.Name, collection.Name },
+            { x => x.Description, collection.Description ?? "" },
+        };
+
+        var dialog = await Dialogs.ShowAsync<CollectionDialog>("Edit collection", parameters);
+        if ((await dialog.Result) is { Canceled: false })
+        {
+            await LoadAsync();
+            Snackbar.Add("Collection updated", Severity.Success);
+        }
+    }
+
+    private async Task Delete(Collection collection, int count)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync(
+            "Delete collection?",
+            $"\"{collection.Name}\" will be deleted. Its {count} model(s) stay in the catalog.",
+            yesText: "Delete", noText: null, cancelText: "Cancel");
+
+        if (confirmed != true) return;
+
+        await Editor.DeleteCollectionAsync(collection.Id);
+        await LoadAsync();
+        Snackbar.Add($"Deleted {collection.Name}", Severity.Info);
+    }
+}

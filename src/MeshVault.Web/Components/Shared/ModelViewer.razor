@@ -1,0 +1,225 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<div class="viewer">
+    <canvas @ref="_canvas" class="viewer-canvas"></canvas>
+
+    @if (_status is not null)
+    {
+        <div class="viewer-overlay">
+            @if (_loading)
+            {
+                <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+            }
+            <MudText Typo="Typo.caption">@_status</MudText>
+        </div>
+    }
+
+    <div class="viewer-toolbar">
+        @if (Files.Count > 1)
+        {
+            <MudSelect T="int" Value="_fileId" ValueChanged="SelectFile" Dense="true"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:230px">
+                @foreach (var file in Files)
+                {
+                    <MudSelectItem T="int" Value="@file.Id">@file.FileName</MudSelectItem>
+                }
+            </MudSelect>
+        }
+
+        <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
+            @foreach (var view in ViewPresets)
+            {
+                var target = view.Key;
+                <MudButton Disabled="@(_triangles == 0)" OnClick="@(() => SetView(target))">
+                    @view.Value
+                </MudButton>
+            }
+        </MudButtonGroup>
+
+        <MudTooltip Text="Reset the view">
+            <MudIconButton Icon="@Icons.Material.Filled.CenterFocusStrong" Size="Size.Small"
+                           Disabled="@(_triangles == 0)" OnClick="ResetView" />
+        </MudTooltip>
+        <MudTooltip Text="@(_autoRotate ? "Stop spinning" : "Spin the model")">
+            <MudIconButton Icon="@Icons.Material.Filled.Autorenew" Size="Size.Small"
+                           Color="@(_autoRotate ? Color.Primary : Color.Default)"
+                           Disabled="@(_triangles == 0)" OnClick="ToggleAutoRotate" />
+        </MudTooltip>
+
+        <MudSpacer />
+        @if (_triangles > 0)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mr-2">
+                @_triangles.ToString("N0") triangles@(_decimated ? " (simplified)" : "")
+            </MudText>
+        }
+        <MudTooltip Text="Use the current angle as this model's card image">
+            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.PhotoCamera"
+                       Disabled="@(_loading || _saving || _triangles == 0)"
+                       OnClick="TakeSnapshot">
+                @(_saving ? "Saving..." : "Set as image")
+            </MudButton>
+        </MudTooltip>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public int ModelId { get; set; }
+    [Parameter, EditorRequired] public List<ModelFile> Files { get; set; } = [];
+    /// <summary>Raised after a snapshot is saved, so the page can refresh its card image.</summary>
+    [Parameter] public EventCallback OnSnapshotSaved { get; set; }
+
+    private ElementReference _canvas;
+    private IJSObjectReference? _module;
+    private int _fileId;
+    private int _triangles;
+    private bool _decimated;
+    private bool _loading;
+    private bool _saving;
+    private bool _autoRotate;
+    private string? _status;
+
+    /// <summary>Camera presets offered in the toolbar.</summary>
+    private static readonly Dictionary<string, string> ViewPresets = new()
+    {
+        ["front"] = "Front", ["left"] = "Left", ["right"] = "Right",
+        ["top"] = "Top", ["iso"] = "3/4",
+    };
+
+    /// <summary>Matches the server's viewer budget, for the "simplified" note.</summary>
+    private const int ViewerTriangleBudget = 250_000;
+
+    protected override void OnParametersSet()
+    {
+        if (_fileId == 0 && Files.Count > 0) _fileId = Files[0].Id;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || Files.Count == 0) return;
+
+        _module = await JS.InvokeAsync<IJSObjectReference>(
+            "import", "/js/model-viewer.js");
+        await LoadAsync();
+    }
+
+    private async Task SelectFile(int fileId)
+    {
+        _fileId = fileId;
+        await LoadAsync();
+    }
+
+    private async Task SetView(string which)
+    {
+        if (_module is null) return;
+        _autoRotate = false;
+        await _module.InvokeVoidAsync("setView", _canvas, which);
+    }
+
+    private async Task ResetView()
+    {
+        if (_module is null) return;
+        _autoRotate = false;
+        await _module.InvokeVoidAsync("resetView", _canvas);
+    }
+
+    private async Task ToggleAutoRotate()
+    {
+        if (_module is null) return;
+        _autoRotate = !_autoRotate;
+        await _module.InvokeVoidAsync("setAutoRotate", _canvas, _autoRotate);
+    }
+
+    private async Task LoadAsync()
+    {
+        if (_module is null || _fileId == 0) return;
+
+        _loading = true;
+        _triangles = 0;
+        _status = "Loading model...";
+        StateHasChanged();
+
+        // A model that has not been previewed before is read straight off the
+        // library share, which can take a while. Say so rather than leaving a
+        // bare spinner that looks like a hang.
+        using var slow = new Timer(_ => InvokeAsync(() =>
+        {
+            if (!_loading) return;
+            _status = "Still reading this model from the library. Large models can take a minute.";
+            StateHasChanged();
+        }), null, TimeSpan.FromSeconds(4), Timeout.InfiniteTimeSpan);
+
+        try
+        {
+            _triangles = await _module.InvokeAsync<int>(
+                "init", TimeSpan.FromMinutes(4), _canvas, _fileId);
+            _decimated = _triangles >= ViewerTriangleBudget;
+            _status = _triangles == 0 ? "Nothing to display in this file." : null;
+        }
+        catch (JSException ex)
+        {
+            _status = ex.Message.Contains("Timed out", StringComparison.OrdinalIgnoreCase)
+                ? "Timed out reading this model. Try again once previews have finished building."
+                : "Could not load this model.";
+        }
+        catch (TaskCanceledException)
+        {
+            _status = "Timed out reading this model. Try again in a moment.";
+        }
+        catch (Exception)
+        {
+            _status = "Could not load this model.";
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task TakeSnapshot()
+    {
+        if (_module is null) return;
+
+        _saving = true;
+        try
+        {
+            // The PNG is posted straight from the browser rather than round-tripped
+            // through the circuit, which would base64 a few hundred KB over SignalR.
+            var saved = await _module.InvokeAsync<bool>("saveSnapshot", _canvas, ModelId);
+            if (!saved)
+            {
+                Snackbar.Add("Could not save the snapshot.", Severity.Error);
+                return;
+            }
+
+            Snackbar.Add("Snapshot saved as the card image", Severity.Success);
+            await OnSnapshotSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not save the snapshot: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is null) return;
+        try
+        {
+            await _module.InvokeVoidAsync("dispose", _canvas);
+            await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone; the browser has torn the canvas down anyway.
+        }
+    }
+}

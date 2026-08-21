@@ -1,0 +1,128 @@
+@page "/account"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Identity
+@inject UserManager<ApplicationUser> Users
+@inject AccountSetup Accounts
+@inject AuthenticationStateProvider AuthState
+@inject ISnackbar Snackbar
+
+<PageTitle>My account - MeshVault</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-6">My account</MudText>
+
+<MudGrid Spacing="4">
+    <MudItem xs="12" md="6">
+        <MudPaper Outlined="true" Class="pa-5">
+            <MudText Typo="Typo.overline" Class="mud-text-secondary">Profile</MudText>
+            <MudSimpleTable Dense="true" Elevation="0" Class="mt-2">
+                <tbody>
+                    <tr><td class="mud-text-secondary">User name</td><td>@_user?.UserName</td></tr>
+                    <tr><td class="mud-text-secondary">Display name</td><td>@(_user?.DisplayName ?? "—")</td></tr>
+                    <tr><td class="mud-text-secondary">Email</td><td>@(_user?.Email ?? "—")</td></tr>
+                    <tr>
+                        <td class="mud-text-secondary">Role</td>
+                        <td>
+                            @foreach (var role in _roles)
+                            {
+                                <MudChip T="string" Size="Size.Small" Class="ma-0 mr-1"
+                                         Color="@(role == Roles.Admin ? Color.Primary : Color.Default)"
+                                         Variant="Variant.Outlined">@role</MudChip>
+                            }
+                        </td>
+                    </tr>
+                </tbody>
+            </MudSimpleTable>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Outlined="true" Class="pa-5">
+            <MudText Typo="Typo.overline" Class="mud-text-secondary">Change password</MudText>
+
+            <MudTextField @bind-Value="_currentPassword" Label="Current password" InputType="InputType.Password"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" />
+            <MudTextField @bind-Value="_newPassword" Label="New password" InputType="InputType.Password"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3"
+                          HelperText="At least 10 characters" />
+            <MudTextField @bind-Value="_confirmPassword" Label="Confirm new password" InputType="InputType.Password"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" />
+
+            @if (_passwordErrors.Count > 0)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mt-3">
+                    @foreach (var error in _passwordErrors)
+                    {
+                        <div>@error</div>
+                    }
+                </MudAlert>
+            }
+
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" Class="mt-4"
+                       Disabled="@(!CanChangePassword)" OnClick="ChangePassword">Change password</MudButton>
+        </MudPaper>
+    </MudItem>
+
+    <AuthorizeView Policy="@Policies.Admin">
+        <MudItem xs="12" md="6">
+            <MudPaper Outlined="true" Class="pa-5">
+                <MudText Typo="Typo.overline" Class="mud-text-secondary">Accounts</MudText>
+                <MudText Typo="Typo.body2" Class="mt-2">
+                    @_userCount account@(_userCount == 1 ? "" : "s") on this MeshVault.
+                </MudText>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" Class="mt-3"
+                           StartIcon="@Icons.Material.Filled.ManageAccounts" Href="/users">
+                    Manage accounts
+                </MudButton>
+            </MudPaper>
+        </MudItem>
+    </AuthorizeView>
+</MudGrid>
+
+@code {
+    private ApplicationUser? _user;
+    private IList<string> _roles = [];
+    private int _userCount;
+    private bool _registrationOpen;
+
+    private string _currentPassword = "";
+    private string _newPassword = "";
+    private string _confirmPassword = "";
+    private readonly List<string> _passwordErrors = [];
+
+    private bool CanChangePassword =>
+        _currentPassword.Length > 0 && _newPassword.Length >= 10 && _newPassword == _confirmPassword;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthState.GetAuthenticationStateAsync();
+        _user = await Users.GetUserAsync(state.User);
+        if (_user is not null) _roles = await Users.GetRolesAsync(_user);
+
+        _userCount = Users.Users.Count();
+        _registrationOpen = await Accounts.RegistrationAllowedAsync();
+    }
+
+    private async Task SetRegistrationOpen(bool open)
+    {
+        _registrationOpen = open;
+        await Accounts.SetRegistrationOpenAsync(open);
+        Snackbar.Add(open ? "Registration is open" : "Registration is closed", Severity.Info);
+    }
+
+    private async Task ChangePassword()
+    {
+        _passwordErrors.Clear();
+        if (_user is null) return;
+
+        var result = await Users.ChangePasswordAsync(_user, _currentPassword, _newPassword);
+        if (!result.Succeeded)
+        {
+            _passwordErrors.AddRange(result.Errors.Select(e => e.Description));
+            return;
+        }
+
+        _currentPassword = _newPassword = _confirmPassword = "";
+        Snackbar.Add("Password changed", Severity.Success);
+    }
+}

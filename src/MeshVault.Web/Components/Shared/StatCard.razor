@@ -1,0 +1,13 @@
+<MudPaper Outlined="true" Class="pa-4 d-flex align-center gap-3" Style="height:100%">
+    <MudIcon Icon="@Icon" Color="Color.Primary" Size="Size.Medium" />
+    <div>
+        <MudText Typo="Typo.h6" Style="line-height:1.2">@Value</MudText>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary text-uppercase">@Label</MudText>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public string Value { get; set; } = "";
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+    [Parameter] public string Icon { get; set; } = Icons.Material.Filled.Circle;
+}

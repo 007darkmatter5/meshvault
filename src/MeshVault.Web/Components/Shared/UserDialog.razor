@@ -1,0 +1,81 @@
+@inject MeshVault.Web.Services.UserAdmin Admin
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">New account</MudText>
+    </TitleContent>
+
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudTextField @bind-Value="_userName" Label="User name" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Immediate="true" AutoFocus="true"
+                          Error="@string.IsNullOrWhiteSpace(_userName)" ErrorText="A user name is required" />
+
+            <MudTextField @bind-Value="_displayName" Label="Display name (optional)"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+
+            <MudTextField @bind-Value="_email" Label="Email (optional)" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" />
+
+            <MudSelect @bind-Value="_role" Label="Role" Variant="Variant.Outlined" Margin="Margin.Dense">
+                @foreach (var role in Roles.All)
+                {
+                    <MudSelectItem T="string" Value="@role">@role</MudSelectItem>
+                }
+            </MudSelect>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                @(_role == Roles.Admin
+                    ? "Administrators manage libraries, previews and accounts."
+                    : "Members browse the catalog and keep their own collections and favorites.")
+            </MudText>
+
+            <MudTextField @bind-Value="_password" Label="Password" InputType="InputType.Password"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
+                          HelperText="At least 10 characters. Share it with them and let them change it." />
+
+            @if (_errors.Count > 0)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">
+                    @foreach (var error in _errors)
+                    {
+                        <div>@error</div>
+                    }
+                </MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="@(() => Dialog.Cancel())">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!CanSave)" OnClick="Save">
+            Create account
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+
+    private string _userName = "";
+    private string? _displayName;
+    private string? _email;
+    private string _role = Roles.Member;
+    private string _password = "";
+    private readonly List<string> _errors = [];
+
+    private bool CanSave => !string.IsNullOrWhiteSpace(_userName) && _password.Length >= 10;
+
+    private async Task Save()
+    {
+        _errors.Clear();
+
+        var result = await Admin.CreateAsync(_userName, _email, _displayName, _password, _role);
+        if (!result.Succeeded)
+        {
+            _errors.AddRange(result.Errors.Select(e => e.Description));
+            return;
+        }
+
+        Dialog.Close(DialogResult.Ok(true));
+    }
+}
