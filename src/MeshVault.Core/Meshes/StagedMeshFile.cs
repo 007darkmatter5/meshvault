@@ -83,6 +83,37 @@ public sealed class StagedMeshFile : IDisposable
         }
     }
 
+    /// <summary>
+    /// Deletes staged copies left behind by a process that died before it could
+    /// dispose them. Nothing here survives a restart by design, so anything
+    /// present at startup is garbage — and a killed scan can strand a copy of
+    /// every large model it was working on.
+    /// </summary>
+    public static long CleanUp(string stagingDirectory)
+    {
+        if (!Directory.Exists(stagingDirectory)) return 0;
+
+        long reclaimed = 0;
+        try
+        {
+            foreach (var path in Directory.EnumerateFiles(stagingDirectory, "mv-stage-*"))
+            {
+                try
+                {
+                    var size = new FileInfo(path).Length;
+                    File.Delete(path);
+                    reclaimed += size;
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+
+        return reclaimed;
+    }
+
     private static void TryDelete(string path)
     {
         try { if (File.Exists(path)) File.Delete(path); }

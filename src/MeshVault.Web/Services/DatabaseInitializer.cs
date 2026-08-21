@@ -48,6 +48,18 @@ public static class DatabaseInitializer
         var pruned = sp.GetRequiredService<GeometryCache>().PruneOldVersions();
         if (pruned > 0) log.LogInformation("Removed {Count} outdated geometry payloads", pruned);
 
+        // Staged copies are transient by definition, so anything still on disk
+        // was stranded by a process that did not shut down cleanly. Left alone
+        // it grows without bound, and each stranded file is as large as the
+        // model it came from.
+        var reclaimed = StagedMeshFile.CleanUp(Path.Combine(options.DataPath, "staging"));
+        if (reclaimed > 0)
+        {
+            log.LogInformation(
+                "Cleared {Megabytes:N0} MB of staged model files left by a previous run",
+                reclaimed / 1048576);
+        }
+
         await RequeueThumbnailsIfRendererChangedAsync(sp, db, log);
     }
 
