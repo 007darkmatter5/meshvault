@@ -146,7 +146,7 @@ from `MeshVaultOptions`/environment. Do not conflate them.
 
 ## Deployment
 
-Ships as a container image to GHCR via `.github/workflows/ci.yml`; `unraid/meshvault.xml` is the
+Ships as a container image to GHCR via `.github/workflows/ci.yml`; `templates/meshvault.xml` is the
 Unraid template. `/data` holds the SQLite database, thumbnails, geometry cache **and the data
 protection keys** — without persisting those, every image update signs everyone out.
 `README.md` has the install steps and the full configuration table.

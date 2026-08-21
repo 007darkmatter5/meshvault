@@ -14,45 +14,36 @@ imaging libraries, no external services.
 
 ## Running it on Unraid
 
-### Using the template
+The old **Template Repositories** field on the Docker tab is gone — it was deprecated in
+favour of Community Applications. Until this is listed there, add the container by hand.
 
-Unraid has no "paste a template URL" box on the Add Container page. Register the repository
-once instead, and the template shows up in the Template dropdown from then on.
+### By hand
 
-1. **Docker** tab → turn on **Advanced View** (top right). The field is hidden in Basic View.
-2. Scroll to **Template Repositories** at the bottom and add, on its own line:
-   `https://github.com/007darkmatter5/meshvault`
-3. **Save**. Unraid fetches the repo and scans it for templates.
-4. **Add Container** → pick **MeshVault** from the **Template** dropdown.
-5. Check the two paths:
-   - **App Data** → `/mnt/user/appdata/meshvault` (put this on **cache or an SSD**)
-   - **Model Library** → wherever your models live, mounted **read-only** by default
-6. Apply, then open the WebUI and **create the first account** — it becomes the administrator.
-
-If it does not appear in the dropdown, drop the template straight onto the flash drive
-instead. This always works, but will not pick up template changes later:
-
-```bash
-mkdir -p /boot/config/plugins/dockerMan/templates-user
-cd /boot/config/plugins/dockerMan/templates-user
-wget https://raw.githubusercontent.com/007darkmatter5/meshvault/main/unraid/meshvault.xml
-```
-
-It then appears under **User templates**.
-
-### Or by hand
-
-Docker tab → Add Container → toggle to advanced view:
+Docker tab → **Add Container** → turn on **Advanced View**:
 
 | Field | Value |
 | --- | --- |
+| Name | `MeshVault` |
 | Repository | `ghcr.io/007darkmatter5/meshvault:latest` |
 | Network Type | `Bridge` |
-| Port | `8080` → `8080` |
-| Path | `/mnt/user/appdata/meshvault` → `/data` (rw) |
-| Path | `/mnt/user/models` → `/models` (ro) |
-| Variable | `MeshVault__Libraries__0__Name` = `Models` |
-| Variable | `MeshVault__Libraries__0__Path` = `/models` |
+| WebUI | `http://[IP]:[PORT:8080]/` |
+
+Then add:
+
+- **Port** — `8080` → `8080`, TCP
+- **Path** — `/mnt/user/appdata/meshvault` → `/data`, Read/Write
+- **Path** — your models folder → `/models`, **Read Only**
+- **Variable** — `MeshVault__Libraries__0__Name` = `Models`
+- **Variable** — `MeshVault__Libraries__0__Path` = `/models`
+
+Apply, then open the WebUI and **create the first account** — it becomes the administrator.
+Unraid saves this as a user template, so later edits are one click.
+
+### Via Community Applications
+
+`templates/meshvault.xml` and `ca_profile.xml` are ready for submission at
+[ca.unraid.net/submit](https://ca.unraid.net/submit). Once accepted, MeshVault installs
+from the **Apps** tab with the paths and variables pre-filled.
 
 ### Or with compose
 

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Maintainer>
+  <Icon>https://raw.githubusercontent.com/007darkmatter5/meshvault/main/templates/meshvault.png</Icon>
+  <Profile>
+    MeshVault is a self-hosted catalog for a 3D printing model collection. It indexes model
+    folders in place, never moving or renaming files unless you allow it, and adds search,
+    tags, collections, designers, source links, notes, rendered thumbnails and an in-browser
+    3D preview you can rotate and snapshot.
+  </Profile>
+  <WebPage>https://github.com/007darkmatter5/meshvault</WebPage>
+</Maintainer>

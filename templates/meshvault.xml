@@ -29,7 +29,7 @@
   <Category>MediaApp:Other Productivity:</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <TemplateURL/>
-  <Icon>https://raw.githubusercontent.com/007darkmatter5/meshvault/main/unraid/meshvault.png</Icon>
+  <Icon>https://raw.githubusercontent.com/007darkmatter5/meshvault/main/templates/meshvault.png</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>
