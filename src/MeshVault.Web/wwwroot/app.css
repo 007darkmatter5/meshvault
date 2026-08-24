@@ -284,7 +284,7 @@ html, body {
     font-size: .85rem;
 }
 .diag-list dt { color: var(--mud-palette-text-secondary, #8b93a1); }
-.diag-list dd { margin: 0; font-family: ui-monospace, monospace; }
+.diag-list dd { margin: 0; font-family: ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .diag-ok { color: #7ddba4; }
 .diag-bad { color: #e05252; }

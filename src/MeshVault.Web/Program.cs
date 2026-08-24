@@ -149,11 +149,17 @@ app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages:
 // Only page requests get the friendly not-found page. Re-executing it for a
 // media request would answer an <img> tag with 21 KB of HTML, and replaying a
 // POST body through the Blazor endpoint turns a 404 into a content-type error.
+//
+// Scripts and stylesheets are here for the same reason: a missing framework
+// asset that answers 200-shaped HTML is far harder to recognise than a bare
+// 404, and it is the browser, not a person, reading the reply.
 app.Use(async (context, next) =>
 {
     if ((MediaEndpoints.IsMediaPath(context.Request.Path)
          || context.Request.Path.StartsWithSegments("/health")
-         || context.Request.Path.StartsWithSegments("/diag"))
+         || context.Request.Path.StartsWithSegments("/diag")
+         || context.Request.Path.StartsWithSegments("/_framework")
+         || context.Request.Path.StartsWithSegments("/_content"))
         && context.Features.Get<IStatusCodePagesFeature>() is { } statusCodePages)
     {
         statusCodePages.Enabled = false;

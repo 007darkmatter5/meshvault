@@ -96,24 +96,69 @@
         row('Cloudflare', true, 'not rewriting this page');
     }
 
-    // Asset delivery, which a reverse proxy can break on its own.
-    [
-        ['Blazor framework asset', '_framework/blazor.web.js'],
-        ['MudBlazor script asset', '_content/MudBlazor/MudBlazor.min.js'],
-        ['MudBlazor style asset', '_content/MudBlazor/MudBlazor.min.css']
-    ].forEach(function (pair) {
-        const cell = row(pair[0], null, 'checking…');
-        fetch(pair[1], { method: 'GET', cache: 'no-store' })
+    // Where the page thinks it lives. A proxy that serves the app under a path
+    // prefix, or rewrites the base, sends every relative asset request to the
+    // wrong place.
+    const baseHref = document.querySelector('base');
+    row('Page origin', true, location.origin + '  (base href "'
+        + (baseHref ? baseHref.getAttribute('href') : 'none') + '")');
+
+    // Re-request exactly what the document asked for, rather than a guessed
+    // path: Blazor and MudBlazor are loaded under fingerprinted names that
+    // change with every build, so a hardcoded path can fail while the real one
+    // is fine, and vice versa.
+    function wanted(label, selector, attribute) {
+        const cell = row(label, null, 'waiting…');
+
+        // The script tags sit at the end of the body, after this file, so the
+        // document is still being parsed when this runs.
+        waitFor(function () { return document.querySelector(selector) !== null; }, function (found) {
+            if (!found) {
+                set(cell, false, 'the page does not reference it at all');
+                return;
+            }
+            check(cell, document.querySelector(selector)[attribute]);
+        });
+    }
+
+    function check(cell, url) {
+        fetch(url, { cache: 'no-store' })
             .then(function (response) {
                 return response.text().then(function (body) {
-                    // A proxy or a wrong content root can answer 200 with an
-                    // empty body, which looks fine in a network tab summary.
-                    const ok = response.ok && body.length > 0;
-                    set(cell, ok, 'HTTP ' + response.status + ', ' + body.length.toLocaleString() + ' bytes');
+                    const type = response.headers.get('content-type') || '';
+                    // Two failures that both look like success at a glance: a
+                    // 200 with nothing in it, and a 404 answered with the
+                    // friendly not-found page instead of the asset.
+                    const html = type.indexOf('text/html') !== -1;
+                    const ok = response.ok && body.length > 0 && !html;
+
+                    let detail = 'HTTP ' + response.status + ', '
+                        + body.length.toLocaleString() + ' bytes, ' + (type || 'no content type');
+                    if (html && !response.ok) detail += ' — an HTML error page, not the asset';
+                    else if (html) detail += ' — HTML where a script or stylesheet was expected';
+                    else if (response.ok && body.length === 0) detail += ' — empty';
+
+                    // Cloudflare stamps these. A failure served from its cache
+                    // is Cloudflare's copy of an old fault, not the server's
+                    // answer today, and a purge fixes what a redeploy will not.
+                    const cached = response.headers.get('cf-cache-status');
+                    if (cached) {
+                        detail += '\nCloudflare cache: ' + cached;
+                        if (!response.ok && cached === 'HIT')
+                            detail += ' — this failure is cached at the edge, purge it';
+                    }
+
+                    detail += '\n' + url;
+
+                    set(cell, ok, detail);
                 });
             })
-            .catch(function (error) { set(cell, false, String(error)); });
-    });
+            .catch(function (error) { set(cell, false, String(error) + '\n' + url); });
+    }
+
+    wanted('Blazor script URL', 'script[src*="blazor.web"]', 'src');
+    wanted('MudBlazor script URL', 'script[src*="MudBlazor"]', 'src');
+    wanted('MudBlazor style URL', 'link[href*="MudBlazor"]', 'href');
 
     // The one that catches a proxy with WebSocket support switched off, which is
     // the most common reason a Blazor Server app goes quiet behind Nginx Proxy
