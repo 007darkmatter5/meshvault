@@ -15,6 +15,21 @@ public record PathCheck(string Path, bool Exists, bool Readable, bool Writable, 
 public record LibraryCheck(string Name, string Path, bool AllowOrganize, bool Exists, bool Readable,
     int Models, DateTimeOffset? LastScannedUtc, string? Problem);
 
+/// <summary>
+/// Whether the browser's copy of Blazor is actually being served: the file on
+/// disk, and the route that would answer for it.
+/// </summary>
+/// <remarks>
+/// These are separate failures with one symptom. A missing file means the image
+/// was built wrong; a missing route means the app is serving from somewhere it
+/// did not expect, and answers a 404 for a file that is sitting right there.
+/// Either way nothing on any page responds, and neither is visible from the
+/// browser, which only ever sees the 404.
+/// </remarks>
+public record ScriptDelivery(
+    string WebRoot, bool WebRootExists, bool FileOnDisk, long FileBytes,
+    int FrameworkRoutes, int StaticRoutes, IReadOnlyList<string> BlazorRoutes);
+
 public record DiagnosticsSnapshot(
     string Version,
     string Environment,
@@ -23,6 +38,8 @@ public record DiagnosticsSnapshot(
     bool InContainer,
     TimeSpan Uptime,
     DateTimeOffset TakenUtc,
+    string ContentRoot,
+    ScriptDelivery Scripts,
     PathCheck DataPath,
     long DatabaseBytes,
     int ThumbnailFiles,
@@ -45,7 +62,8 @@ public record DiagnosticsSnapshot(
 public class DiagnosticsReport(
     IDbContextFactory<MeshVaultDbContext> factory,
     IOptions<MeshVaultOptions> options,
-    IHostEnvironment environment,
+    IWebHostEnvironment environment,
+    EndpointDataSource endpoints,
     ThumbnailService thumbnails,
     CircuitTracker circuits,
     RecentEvents events)
@@ -75,6 +93,8 @@ public class DiagnosticsReport(
             InContainer: System.Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true",
             Uptime: DateTimeOffset.UtcNow - Process.GetCurrentProcess().StartTime.ToUniversalTime(),
             TakenUtc: DateTimeOffset.UtcNow,
+            ContentRoot: environment.ContentRootPath,
+            Scripts: CheckScriptDelivery(),
             DataPath: CheckWritable(dataPath),
             DatabaseBytes: Length(System.IO.Path.Combine(dataPath, "meshvault.db")),
             ThumbnailFiles: CountFiles(System.IO.Path.Combine(dataPath, "thumbnails")),
@@ -112,6 +132,16 @@ public class DiagnosticsReport(
         text.AppendLine($"OS              {s.OperatingSystem}");
         text.AppendLine($"Uptime          {s.Uptime:d'd 'hh':'mm':'ss}");
         text.AppendLine();
+        text.AppendLine($"Content root    {s.ContentRoot}");
+        text.AppendLine($"Web root        {s.Scripts.WebRoot} (exists {s.Scripts.WebRootExists})");
+        text.AppendLine($"blazor.web.js   on disk {s.Scripts.FileOnDisk}, {s.Scripts.FileBytes:N0} bytes");
+        text.AppendLine($"                {s.Scripts.FrameworkRoutes} _framework route(s) of "
+            + $"{s.Scripts.StaticRoutes} mapped");
+        foreach (var route in s.Scripts.BlazorRoutes)
+            text.AppendLine("                  /" + route.TrimStart('/'));
+        if (s.Scripts.BlazorRoutes.Count == 0)
+            text.AppendLine("                  no route mentions blazor - nothing will serve the script");
+        text.AppendLine();
         text.AppendLine($"Data path       {s.DataPath.Path}");
         text.AppendLine($"                exists {s.DataPath.Exists}, readable {s.DataPath.Readable}, "
             + $"writable {s.DataPath.Writable}"
@@ -144,6 +174,38 @@ public class DiagnosticsReport(
             text.AppendLine($"  {entry.When:u} {entry.Level} {entry.Category}: {entry.Message}");
 
         return text.ToString();
+    }
+
+    /// <summary>
+    /// Asks the two questions a 404 on blazor.web.js cannot distinguish between:
+    /// is the file there, and is anything mapped to serve it?
+    /// </summary>
+    private ScriptDelivery CheckScriptDelivery()
+    {
+        var webRoot = environment.WebRootPath ?? "";
+        var script = System.IO.Path.Combine(webRoot, "_framework", "blazor.web.js");
+
+        var routes = endpoints.Endpoints
+            .OfType<RouteEndpoint>()
+            .Select(e => e.RoutePattern.RawText ?? "")
+            .ToList();
+
+        return new ScriptDelivery(
+            WebRoot: string.IsNullOrEmpty(webRoot) ? "(not set)" : webRoot,
+            WebRootExists: !string.IsNullOrEmpty(webRoot) && Directory.Exists(webRoot),
+            FileOnDisk: File.Exists(script),
+            FileBytes: Length(script),
+            FrameworkRoutes: routes.Count(r => r.StartsWith("_framework", StringComparison.OrdinalIgnoreCase)),
+            StaticRoutes: routes.Count,
+            // The script itself and the hub it connects to, and nothing else.
+            // A bare "blazor" match also catches every MudBlazor asset, which
+            // buries the four lines that matter.
+            BlazorRoutes: routes
+                .Where(r => r.Contains("blazor.web", StringComparison.OrdinalIgnoreCase)
+                    || r.TrimStart('/').StartsWith("_blazor", StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)
+                .ToList());
     }
 
     private static (bool Exists, bool Readable, string? Problem) Probe(string path)

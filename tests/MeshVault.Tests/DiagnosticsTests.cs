@@ -102,6 +102,7 @@ public class DiagnosticsTextTests
         IReadOnlyList<LibraryCheck>? libraries = null,
         IReadOnlyList<LoggedEvent>? events = null,
         PathCheck? dataPath = null,
+        ScriptDelivery? scripts = null,
         int openCircuits = 1) =>
         new(
             Version: "1.2.3+abcdef",
@@ -111,6 +112,9 @@ public class DiagnosticsTextTests
             InContainer: true,
             Uptime: TimeSpan.FromHours(5),
             TakenUtc: new DateTimeOffset(2026, 8, 24, 12, 0, 0, TimeSpan.Zero),
+            ContentRoot: "/app",
+            Scripts: scripts ?? new ScriptDelivery(
+                "/app/wwwroot", true, true, 200_645, 6, 40, ["_framework/blazor.web.js"]),
             DataPath: dataPath ?? new PathCheck("/data", true, true, true, null),
             DatabaseBytes: 4096,
             ThumbnailFiles: 12,
@@ -176,6 +180,37 @@ public class DiagnosticsTextTests
     public void No_errors_reads_as_none_rather_than_a_blank_gap()
     {
         Assert.Contains("none", DiagnosticsReport.ToText(Sample()));
+    }
+
+    [Fact]
+    public void A_missing_script_file_is_distinguished_from_a_missing_route()
+    {
+        // The file is there and nothing is mapped to serve it: the browser sees
+        // the same 404 either way, so the report has to separate them.
+        var text = DiagnosticsReport.ToText(Sample(scripts:
+            new ScriptDelivery("/app/wwwroot", true, true, 200_645, 0, 40, [])));
+
+        Assert.Contains("on disk True", text);
+        Assert.Contains("0 _framework route(s) of 40 mapped", text);
+        Assert.Contains("no route mentions blazor", text);
+    }
+
+    [Fact]
+    public void A_script_missing_from_the_image_is_reported_as_such()
+    {
+        var text = DiagnosticsReport.ToText(Sample(scripts:
+            new ScriptDelivery("/app/wwwroot", true, false, 0, 6, 40, ["_framework/blazor.web.js"])));
+
+        Assert.Contains("on disk False, 0 bytes", text);
+    }
+
+    [Fact]
+    public void A_wrong_web_root_shows_up_before_anything_else_does()
+    {
+        var text = DiagnosticsReport.ToText(Sample(scripts:
+            new ScriptDelivery("/somewhere/else/wwwroot", false, false, 0, 6, 40, [])));
+
+        Assert.Contains("/somewhere/else/wwwroot (exists False)", text);
     }
 
     [Fact]
