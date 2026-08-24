@@ -22,6 +22,24 @@ RUN dotnet publish src/MeshVault.Web/MeshVault.Web.csproj \
     -c Release -a "$TARGETARCH" --no-restore -o /app \
     -p:SourceRevisionId="$SOURCE_COMMIT"
 
+# blazor.web.js is what turns the rendered HTML into a working application.
+# Without it every page still loads and looks perfect, and nothing on it
+# responds to a click — there is no error, anywhere, at any point.
+#
+# An image shipped without it. Publishing it is not optional and not
+# conditional, so the build now proves it happened rather than assuming it,
+# and prints what it found when it did not.
+RUN echo "SDK: $(dotnet --version), TARGETARCH: ${TARGETARCH}" \
+    && if [ ! -s /app/wwwroot/_framework/blazor.web.js ]; then \
+         echo "FATAL: blazor.web.js is missing from the publish output."; \
+         echo "--- /app/wwwroot ---";            ls -la /app/wwwroot || true; \
+         echo "--- /app/wwwroot/_framework ---"; ls -la /app/wwwroot/_framework || true; \
+         echo "--- static asset manifest ---"; \
+         grep -o '"Route":"_framework[^"]*"' /app/*.staticwebassets.endpoints.json | sort -u || true; \
+         exit 1; \
+       fi \
+    && echo "blazor.web.js: $(stat -c%s /app/wwwroot/_framework/blazor.web.js) bytes"
+
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 
