@@ -2,6 +2,12 @@
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG TARGETARCH
+
+# Stamped into the assembly so the diagnostics page can name the exact commit
+# it is running. The build context has no .git directory, so nothing else can
+# work this out, and "which build am I on" is the first question every report
+# has to answer.
+ARG SOURCE_COMMIT=unknown
 WORKDIR /src
 
 # Restore as its own layer so code changes do not re-download packages.
@@ -13,7 +19,8 @@ RUN dotnet restore src/MeshVault.Web/MeshVault.Web.csproj -a "$TARGETARCH"
 
 COPY src/ src/
 RUN dotnet publish src/MeshVault.Web/MeshVault.Web.csproj \
-    -c Release -a "$TARGETARCH" --no-restore -o /app
+    -c Release -a "$TARGETARCH" --no-restore -o /app \
+    -p:SourceRevisionId="$SOURCE_COMMIT"
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
