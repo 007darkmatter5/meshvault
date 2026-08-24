@@ -87,5 +87,57 @@ public class MeshVaultDbContext(DbContextOptions<MeshVaultDbContext> options)
             e.HasOne(x => x.ModelEntry).WithMany(x => x.Favorites)
                 .HasForeignKey(x => x.ModelEntryId).OnDelete(DeleteBehavior.Cascade);
         });
+
+        b.Entity<Paint>(e =>
+        {
+            e.Property(x => x.OwnerId).HasMaxLength(450);
+            e.Property(x => x.Name).HasMaxLength(160);
+            e.Property(x => x.Brand).HasMaxLength(80);
+            e.Property(x => x.Range).HasMaxLength(80);
+            e.Property(x => x.Hex).HasMaxLength(9);
+            // One pot per name per rack. Two people may each own Mephiston Red.
+            e.HasIndex(x => new { x.OwnerId, x.NormalizedName }).IsUnique();
+        });
+
+        b.Entity<PaintScheme>(e =>
+        {
+            e.Property(x => x.OwnerId).HasMaxLength(450);
+            e.Property(x => x.OwnerName).HasMaxLength(200);
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.HasIndex(x => x.ModelEntryId);
+            e.HasOne(x => x.ModelEntry).WithMany()
+                .HasForeignKey(x => x.ModelEntryId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<PaintStep>(e =>
+        {
+            e.Property(x => x.PaintName).HasMaxLength(160);
+            e.Property(x => x.Technique).HasMaxLength(80);
+            e.Property(x => x.Area).HasMaxLength(120);
+            e.Property(x => x.Hex).HasMaxLength(9);
+
+            e.HasOne(x => x.PaintScheme).WithMany(x => x.Steps)
+                .HasForeignKey(x => x.PaintSchemeId).OnDelete(DeleteBehavior.Cascade);
+
+            // Throwing a pot away edits an inventory. It must not quietly
+            // rewrite every recipe that mentioned it, which is why the step
+            // keeps the name and the link is allowed to go null.
+            e.HasOne(x => x.Paint).WithMany(x => x.Steps)
+                .HasForeignKey(x => x.PaintId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        b.Entity<SchemePhoto>(e =>
+        {
+            e.Property(x => x.FileName).HasMaxLength(200);
+            e.Property(x => x.ContentType).HasMaxLength(80);
+            e.Property(x => x.Caption).HasMaxLength(400);
+            e.HasOne(x => x.PaintScheme).WithMany(x => x.Photos)
+                .HasForeignKey(x => x.PaintSchemeId).OnDelete(DeleteBehavior.Cascade);
+        });
     }
+
+    public DbSet<Paint> Paints => Set<Paint>();
+    public DbSet<PaintScheme> PaintSchemes => Set<PaintScheme>();
+    public DbSet<PaintStep> PaintSteps => Set<PaintStep>();
+    public DbSet<SchemePhoto> SchemePhotos => Set<SchemePhoto>();
 }

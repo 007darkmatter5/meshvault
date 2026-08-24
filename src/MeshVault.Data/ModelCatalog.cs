@@ -24,7 +24,13 @@ public class ModelCatalog(IDbContextFactory<MeshVaultDbContext> factory, ICurren
 
         models = query.Sort switch
         {
-            ModelSort.Newest => models.OrderByDescending(m => m.AddedUtc).ThenBy(m => m.Id),
+            // By id rather than by AddedUtc, which is what this means but
+            // cannot be asked for: SQLite will not ORDER BY a DateTimeOffset and
+            // EF throws rather than falling back, so picking "Recently added"
+            // took the whole page down. Ids are handed out when the row is
+            // created, which is the moment AddedUtc records, so the order is the
+            // same one.
+            ModelSort.Newest => models.OrderByDescending(m => m.Id),
             ModelSort.Largest => models.OrderByDescending(m => m.TotalBytes).ThenBy(m => m.Id),
             _ => models.OrderBy(m => m.Name).ThenBy(m => m.Id),
         };

@@ -22,4 +22,11 @@ public static class SettingKeys
 
     /// <summary>Render version the existing thumbnails were produced with.</summary>
     public const string ThumbnailRenderVersion = "previews.renderVersion";
+
+    /// <summary>
+    /// When true, paint racks and painting schemes appear. Off by default:
+    /// most people cataloguing models do not paint them, and an unused feature
+    /// is clutter on every model page.
+    /// </summary>
+    public const string PaintsEnabled = "features.paints";
 }

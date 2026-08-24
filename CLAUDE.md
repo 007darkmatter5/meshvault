@@ -151,6 +151,10 @@ from `MeshVaultOptions`/environment. Do not conflate them.
 
 ## Testing notes
 
+- **SQLite will not `ORDER BY` a `DateTimeOffset`**, and EF throws rather than falling back. It
+  compiles, reads fine, and dies the moment someone picks that sort — Browse's "Recently added"
+  shipped broken this way. Order by `Id` (handed out at insert, so the same order as `AddedUtc`)
+  or sort after loading. `ModelSortTests` runs every sort the UI offers for exactly this reason.
 - **`Progress<T>` dispatches asynchronously.** Assertions on collected reports race the final
   report. Use `SyncProgress<T>` in tests; this caused a ~1-in-5 flake.
 - **Razor does not warn about unresolved components** — it emits them as literal markup, so a
