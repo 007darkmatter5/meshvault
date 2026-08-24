@@ -72,6 +72,12 @@
     /// <summary>Raised after a snapshot is saved, so the page can refresh its card image.</summary>
     [Parameter] public EventCallback OnSnapshotSaved { get; set; }
 
+    /// <summary>
+    /// Camera position saved with this model's snapshot, as a multiple of the
+    /// bounding radius, or null for the default framing.
+    /// </summary>
+    [Parameter] public double[]? SavedView { get; set; }
+
     private ElementReference _canvas;
     private IJSObjectReference? _module;
     private int _fileId;
@@ -155,7 +161,7 @@
         try
         {
             _triangles = await _module.InvokeAsync<int>(
-                "init", TimeSpan.FromMinutes(4), _canvas, _fileId);
+                "init", TimeSpan.FromMinutes(4), _canvas, _fileId, SavedView);
             _decimated = _triangles >= ViewerTriangleBudget;
             _status = _triangles == 0 ? "Nothing to display in this file." : null;
         }

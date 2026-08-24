@@ -110,6 +110,10 @@ horizontal drag spin the model about its front-to-back axis.
 `GeometryCache.FormatVersion` invalidates cached payloads; bump it when the payload or the way it
 is built changes, and `PruneOldVersions()` clears the orphans at startup.
 
+Setting a card image also records the camera (`SnapshotView{X,Y,Z}`) so the viewer reopens on that
+angle. It is stored as a **multiple of the bounding radius**, not in scene units — the viewer
+frames every model to fit, so a raw distance would put the camera inside a smaller mesh.
+
 ### Background work
 
 `ScanService`, `ImportService` and `ThumbnailService` all run off the request thread and raise a

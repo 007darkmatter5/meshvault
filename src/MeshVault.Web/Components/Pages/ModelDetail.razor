@@ -73,10 +73,12 @@ else
                     <MudText Typo="Typo.overline" Class="mud-text-secondary">Preview</MudText>
                     <div class="mt-2">
                         <ModelViewer ModelId="_model.Id" Files="PreviewableFiles"
+                                     SavedView="SavedView"
                                      OnSnapshotSaved="OnSnapshotSaved" @key="_model.Id" />
                     </div>
                     <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
-                        Drag to rotate, right-drag to pan, scroll to zoom. "Set as image" uses the angle you are looking at.
+                        Drag to rotate, right-drag to pan, scroll to zoom. "Set as image" uses the angle you are
+                        looking at, and reopening this model returns to it.
                     </MudText>
                 </MudPaper>
             }
@@ -252,6 +254,16 @@ else
             .Where(f => MeshLoader.CanRead(f.Extension))
             .OrderByDescending(f => f.SizeBytes)
             .ToList();
+
+    /// <summary>
+    /// The angle this model's card image was taken from, so the viewer opens on
+    /// it. Null until someone has set an image with a viewer new enough to have
+    /// recorded where it was standing.
+    /// </summary>
+    private double[]? SavedView =>
+        _model is { SnapshotViewX: { } x, SnapshotViewY: { } y, SnapshotViewZ: { } z }
+            ? [x, y, z]
+            : null;
 
     private async Task OnSnapshotSaved() => await LoadAsync();
 

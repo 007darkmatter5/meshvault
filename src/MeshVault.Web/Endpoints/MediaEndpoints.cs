@@ -1,3 +1,4 @@
+using System.Globalization;
 using MeshVault.Core.Imaging;
 using MeshVault.Core.Meshes;
 using MeshVault.Core.Models;
@@ -162,11 +163,50 @@ public static class MediaEndpoints
 
         await store.SaveModelSnapshotAsync(modelId, bytes, ct);
 
+        // The camera rides along as query values rather than in the body,
+        // which is the PNG itself. Absent or unparseable means an older viewer
+        // took the picture, and the model simply keeps its default framing.
+        var view = ParseView(request.Query["vx"], request.Query["vy"], request.Query["vz"]);
+
         await db.Models.Where(m => m.Id == modelId)
-            .ExecuteUpdateAsync(s => s.SetProperty(
-                m => m.SnapshotUpdatedUtc, DateTimeOffset.UtcNow), ct);
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(m => m.SnapshotUpdatedUtc, DateTimeOffset.UtcNow)
+                .SetProperty(m => m.SnapshotViewX, view?.X)
+                .SetProperty(m => m.SnapshotViewY, view?.Y)
+                .SetProperty(m => m.SnapshotViewZ, view?.Z), ct);
 
         return Results.Ok();
+    }
+
+    /// <summary>
+    /// Reads the camera saved with a snapshot, rejecting anything that would
+    /// not frame a model. Null means keep the default framing.
+    /// </summary>
+    /// <remarks>
+    /// Values are multiples of the bounding radius, written by the viewer.
+    /// Missing ones are ordinary: a snapshot taken before the viewer recorded
+    /// its camera sends none, and that model simply opens as it always did.
+    /// </remarks>
+    public static (double X, double Y, double Z)? ParseView(string? x, string? y, string? z)
+    {
+        if (!TryReadDouble(x, out var vx) || !TryReadDouble(y, out var vy) || !TryReadDouble(z, out var vz))
+            return null;
+
+        // A camera at the origin has no direction to look from, and the viewer
+        // divides by that length. A distance of a thousand radii is not a view
+        // anyone chose, so treat it as a bug rather than restoring it.
+        var length = Math.Sqrt(vx * vx + vy * vy + vz * vz);
+        return length is > 0.001 and < 1000 ? (vx, vy, vz) : null;
+    }
+
+    private static bool TryReadDouble(string? raw, out double value)
+    {
+        value = 0;
+        // Invariant culture only: the viewer writes these with toFixed, and a
+        // server in a comma-decimal locale would otherwise read 0.55 as 55.
+        return !string.IsNullOrWhiteSpace(raw)
+            && double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out value)
+            && double.IsFinite(value);
     }
 
     /// <summary>The upload is written to disk and served back, so verify it really is a PNG.</summary>

@@ -126,15 +126,40 @@ class Viewer {
         const radius = this.radius || 1;
         const distance = radius / Math.sin((this.camera.fov * Math.PI / 180) / 2) * 1.15;
 
-        this.camera.position.set(distance * 0.55, distance * 0.42, distance * 0.72);
+        this.frame(distance * 0.55, distance * 0.42, distance * 0.72);
+    }
+
+    /// Restores the angle a snapshot was taken from. The stored position is a
+    /// multiple of the bounding radius, so it reframes correctly on a model of
+    /// a different size to the one it was saved on.
+    applySavedView(view) {
+        const radius = this.radius || 1;
+        this.frame(view[0] * radius, view[1] * radius, view[2] * radius);
+    }
+
+    /// Points the camera at the origin from the given position, with near and
+    /// far planes that suit the model rather than the position.
+    frame(x, y, z) {
+        const radius = this.radius || 1;
+        const distance = radius / Math.sin((this.camera.fov * Math.PI / 180) / 2) * 1.15;
+
+        this.camera.position.set(x, y, z);
         this.camera.near = Math.max(radius / 1000, 0.01);
-        this.camera.far = distance * 10;
+        this.camera.far = Math.max(distance, Math.hypot(x, y, z)) * 10;
         this.camera.updateProjectionMatrix();
 
         this.controls.target.set(0, 0, 0);
         this.controls.minDistance = radius * 0.4;
         this.controls.maxDistance = distance * 6;
         this.controls.update();
+    }
+
+    /// The camera position as a multiple of the bounding radius, which is what
+    /// gets stored alongside a snapshot.
+    savedView() {
+        const radius = this.radius || 1;
+        const p = this.camera.position;
+        return [p.x / radius, p.y / radius, p.z / radius];
     }
 
     clearMesh() {
@@ -181,7 +206,9 @@ class Viewer {
 /// and without a ceiling a stalled request left the spinner up forever.
 const LOAD_TIMEOUT_MS = 180_000;
 
-export async function init(canvas, fileId) {
+/// `savedView` is the camera stored with this model's snapshot, or null to use
+/// the default framing.
+export async function init(canvas, fileId, savedView) {
     dispose(canvas);
 
     const viewer = new Viewer(canvas);
@@ -209,6 +236,11 @@ export async function init(canvas, fileId) {
     if (triangleCount === 0) return 0;
 
     viewer.setGeometry(geometry);
+
+    // Opening on the angle the card image shows, so the model looks the way
+    // the person who set it meant it to look.
+    if (Array.isArray(savedView) && savedView.length === 3) viewer.applySavedView(savedView);
+
     return triangleCount;
 }
 
@@ -274,7 +306,11 @@ export async function saveSnapshot(canvas, modelId) {
         viewer.renderer.domElement.toBlob(resolve, 'image/png'));
     if (!blob) return false;
 
-    const response = await fetch(`/snapshot/${modelId}`, {
+    // The angle goes with the picture, so reopening the model can restore it.
+    const [vx, vy, vz] = viewer.savedView();
+    const query = `?vx=${vx.toFixed(4)}&vy=${vy.toFixed(4)}&vz=${vz.toFixed(4)}`;
+
+    const response = await fetch(`/snapshot/${modelId}${query}`, {
         method: 'POST',
         headers: { 'Content-Type': 'image/png' },
         body: blob,
