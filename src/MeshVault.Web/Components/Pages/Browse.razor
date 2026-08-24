@@ -1,12 +1,13 @@
 @page "/"
 @page "/browse"
-@attribute [Authorize]
+@attribute [Authorize(Policy = Policies.View)]
 @rendermode InteractiveServer
 @implements IDisposable
 @inject ModelCatalog Catalog
 @inject ModelEditor Editor
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthState
 
 <PageTitle>MeshVault</PageTitle>
 
@@ -71,8 +72,11 @@
                 </MudSelect>
 
                 <MudStack Spacing="1">
-                    <MudSwitch T="bool" Value="_favoritesOnly" ValueChanged="@(v => Apply(() => _favoritesOnly = v))"
-                               Color="Color.Warning" Label="Favorites only" />
+                    @if (_canEdit)
+                    {
+                        <MudSwitch T="bool" Value="_favoritesOnly" ValueChanged="@(v => Apply(() => _favoritesOnly = v))"
+                                   Color="Color.Warning" Label="Favorites only" />
+                    }
                     <MudSwitch T="bool" Value="_missingDesigner" ValueChanged="@(v => Apply(() => _missingDesigner = v))"
                                Color="Color.Info" Label="No designer set" />
                     <MudSwitch T="bool" Value="_missingSource" ValueChanged="@(v => Apply(() => _missingSource = v))"
@@ -128,12 +132,15 @@
 
             <MudSpacer />
 
-            <MudButton Size="Size.Small" Variant="@(_selecting ? Variant.Filled : Variant.Outlined)"
-                       Color="@(_selecting ? Color.Primary : Color.Default)"
-                       StartIcon="@Icons.Material.Filled.Checklist"
-                       OnClick="ToggleSelecting">
-                @(_selecting ? "Done" : "Select")
-            </MudButton>
+            @if (_canEdit)
+            {
+                <MudButton Size="Size.Small" Variant="@(_selecting ? Variant.Filled : Variant.Outlined)"
+                           Color="@(_selecting ? Color.Primary : Color.Default)"
+                           StartIcon="@Icons.Material.Filled.Checklist"
+                           OnClick="ToggleSelecting">
+                    @(_selecting ? "Done" : "Select")
+                </MudButton>
+            }
         </div>
 
         @* The selection survives paging and filtering, so this bar has to say
@@ -237,7 +244,7 @@
                                     <MudText Typo="Typo.body2" Class="model-title" title="@model.RelativePath">
                                         @model.Name
                                     </MudText>
-                                    @if (card.IsFavorite)
+                                    @if (card.IsFavorite && _canEdit)
                                     {
                                         <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Warning" Size="Size.Small" />
                                     }
@@ -318,7 +325,12 @@
         || _collectionId is not null || _site is not null || _favoritesOnly
         || _missingDesigner || _missingSource || _selectedTags.Count > 0;
 
-    protected override async Task OnInitializedAsync() => await LoadFacetsAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthState.GetAuthenticationStateAsync();
+        _canEdit = state.User.Identity?.IsAuthenticated ?? false;
+        await LoadFacetsAsync();
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -334,6 +346,12 @@
     }
 
     // Selecting and bulk editing ---------------------------------------------
+
+    /// <summary>
+    /// False for a signed-out visitor. Selecting models leads only to a bulk
+    /// edit, and favorites belong to an account.
+    /// </summary>
+    private bool _canEdit;
 
     private bool _selecting;
 

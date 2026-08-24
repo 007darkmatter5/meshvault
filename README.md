@@ -130,6 +130,22 @@ need to change them account-wide.
 
 ---
 
+## Letting people look without an account
+
+**Settings → Features → Public browsing** lets anyone who can reach the address read the
+catalog without signing in. It is off by default.
+
+Read means read. A signed-out visitor gets Browse, the model pages, the 3D viewer and the
+designer list. They cannot change, rename, tag, favourite, upload or organise anything, and
+collections, favourites and paint racks belong to an account and stay hidden — as do
+Libraries, Accounts and Diagnostics.
+
+Turn it on only if you are content for whoever can reach that address to see your whole
+library, **including your model notes**. If MeshVault is exposed to the internet rather than
+a home network, that is everybody.
+
+---
+
 ## When something is not working
 
 Sign in as an administrator and open **Diagnostics** (`/diagnostics`).

@@ -33,18 +33,25 @@ public static class MediaEndpoints
 
     public static void MapMediaEndpoints(this WebApplication app)
     {
-        // Behind the same login as the pages. These serve the library's actual
-        // contents, so leaving them open would make the sign-in decorative:
-        // anyone reachable could enumerate thumbnails, pull geometry and post
-        // snapshots. Browsers attach the auth cookie to same-origin img and
-        // fetch requests, so the viewer and grid are unaffected.
-        var media = app.MapGroup("").RequireAuthorization();
+        // Behind the same gate as the pages they serve. Leaving these open
+        // outright would make the sign-in decorative: anyone reachable could
+        // enumerate thumbnails and pull geometry. Browsers attach the auth
+        // cookie to same-origin img and fetch requests, so the viewer and grid
+        // are unaffected.
+        //
+        // Reading follows the view policy, which a signed-out visitor satisfies
+        // only where public browsing has been turned on. Writing does not: a
+        // snapshot changes what everybody sees, so it always needs an account.
+        var read = app.MapGroup("").RequireAuthorization(Policies.View);
 
-        media.MapGet("/thumb/model/{modelId:int}", GetModelThumbnail);
-        media.MapGet("/thumb/file/{fileId:int}", GetFileThumbnail);
-        media.MapGet("/mesh/{fileId:int}", GetMeshGeometry);
-        media.MapPost("/snapshot/{modelId:int}", SaveSnapshot).DisableAntiforgery();
-        media.MapGet("/photo/{photoId:int}", GetSchemePhoto);
+        read.MapGet("/thumb/model/{modelId:int}", GetModelThumbnail);
+        read.MapGet("/thumb/file/{fileId:int}", GetFileThumbnail);
+        read.MapGet("/mesh/{fileId:int}", GetMeshGeometry);
+        read.MapGet("/photo/{photoId:int}", GetSchemePhoto);
+
+        app.MapPost("/snapshot/{modelId:int}", SaveSnapshot)
+            .RequireAuthorization()
+            .DisableAntiforgery();
     }
 
     private static async Task<IResult> GetModelThumbnail(

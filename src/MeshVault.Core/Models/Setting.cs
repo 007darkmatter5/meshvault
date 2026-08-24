@@ -29,4 +29,10 @@ public static class SettingKeys
     /// is clutter on every model page.
     /// </summary>
     public const string PaintsEnabled = "features.paints";
+
+    /// <summary>
+    /// When true, anyone who can reach the site may read the catalog without
+    /// signing in. Writing anything still needs an account.
+    /// </summary>
+    public const string PublicBrowsing = "access.publicBrowsing";
 }

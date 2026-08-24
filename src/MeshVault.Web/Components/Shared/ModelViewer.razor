@@ -55,14 +55,17 @@
                 @_triangles.ToString("N0") triangles@(_decimated ? " (simplified)" : "")
             </MudText>
         }
-        <MudTooltip Text="Use the current angle as this model's card image">
-            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
-                       StartIcon="@Icons.Material.Filled.PhotoCamera"
-                       Disabled="@(_loading || _saving || _triangles == 0)"
-                       OnClick="TakeSnapshot">
-                @(_saving ? "Saving..." : "Set as image")
-            </MudButton>
-        </MudTooltip>
+        @if (CanEdit)
+        {
+            <MudTooltip Text="Use the current angle as this model's card image">
+                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.PhotoCamera"
+                           Disabled="@(_loading || _saving || _triangles == 0)"
+                           OnClick="TakeSnapshot">
+                    @(_saving ? "Saving..." : "Set as image")
+                </MudButton>
+            </MudTooltip>
+        }
     </div>
 </div>
 
@@ -77,6 +80,12 @@
     /// bounding radius, or null for the default framing.
     /// </summary>
     [Parameter] public double[]? SavedView { get; set; }
+
+    /// <summary>
+    /// Whether the viewer may set this model's card image. False for a
+    /// signed-out visitor: the snapshot is what everybody else sees.
+    /// </summary>
+    [Parameter] public bool CanEdit { get; set; } = true;
 
     private ElementReference _canvas;
     private IJSObjectReference? _module;

@@ -1,5 +1,5 @@
 @page "/model/{Id:int}"
-@attribute [Authorize]
+@attribute [Authorize(Policy = Policies.View)]
 @rendermode InteractiveServer
 @inject ModelCatalog Catalog
 @inject ModelEditor Editor
@@ -25,7 +25,7 @@ else
     <div class="d-flex align-center gap-3 mb-1">
         <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Href="/browse" Size="Size.Small" />
 
-        @if (_editingName)
+        @if (_editingName && _canEdit)
         {
             <MudTextField @bind-Value="_nameDraft" Variant="Variant.Outlined" Margin="Margin.Dense"
                           Immediate="true" AutoFocus="true" Class="flex-grow-1"
@@ -38,15 +38,18 @@ else
         else
         {
             <MudText Typo="Typo.h5" Class="flex-grow-1">@_model!.Name</MudText>
-            <MudTooltip Text="Rename this model">
-                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="StartRename" />
-            </MudTooltip>
-            @if (_model!.NameSetByUser)
+            @if (_canEdit)
             {
-                <MudTooltip Text="Renamed by you. Reset to use the folder name again.">
-                    <MudIconButton Icon="@Icons.Material.Filled.Restore" Size="Size.Small"
-                                   OnClick="ResetName" />
+                <MudTooltip Text="Rename this model">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="StartRename" />
                 </MudTooltip>
+                @if (_model!.NameSetByUser)
+                {
+                    <MudTooltip Text="Renamed by you. Reset to use the folder name again.">
+                        <MudIconButton Icon="@Icons.Material.Filled.Restore" Size="Size.Small"
+                                       OnClick="ResetName" />
+                    </MudTooltip>
+                }
             }
         }
         @if (_model!.SourceUrl is not null)
@@ -56,11 +59,14 @@ else
                 @(_model.SourceSite ?? "Source")
             </MudButton>
         }
-        <MudTooltip Text="@(_card.IsFavorite ? "Remove from favorites" : "Add to favorites")">
-            <MudIconButton Icon="@(_card.IsFavorite ? Icons.Material.Filled.Star : Icons.Material.Filled.StarBorder)"
-                           Color="@(_card.IsFavorite ? Color.Warning : Color.Default)"
-                           OnClick="ToggleFavorite" />
-        </MudTooltip>
+        @if (_canEdit)
+        {
+            <MudTooltip Text="@(_card.IsFavorite ? "Remove from favorites" : "Add to favorites")">
+                <MudIconButton Icon="@(_card.IsFavorite ? Icons.Material.Filled.Star : Icons.Material.Filled.StarBorder)"
+                               Color="@(_card.IsFavorite ? Color.Warning : Color.Default)"
+                               OnClick="ToggleFavorite" />
+            </MudTooltip>
+        }
     </div>
 
     <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-6" Style="font-family:ui-monospace,monospace">
@@ -76,11 +82,18 @@ else
                     <div class="mt-2">
                         <ModelViewer ModelId="_model.Id" Files="PreviewableFiles"
                                      SavedView="SavedView"
+                                     CanEdit="_canEdit"
                                      OnSnapshotSaved="OnSnapshotSaved" @key="_model.Id" />
                     </div>
                     <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
-                        Drag to rotate, right-drag to pan, scroll to zoom. "Set as image" uses the angle you are
-                        looking at, and reopening this model returns to it.
+                        Drag to rotate, right-drag to pan, scroll to zoom.
+                        @if (_canEdit)
+                        {
+                            <text>
+                                "Set as image" uses the angle you are looking at, and reopening this
+                                model returns to it.
+                            </text>
+                        }
                     </MudText>
                 </MudPaper>
             }
@@ -119,17 +132,63 @@ else
                 </MudTable>
             </MudPaper>
 
-            <MudPaper Outlined="true" Class="pa-4 mt-4">
-                <MudText Typo="Typo.overline" Class="mud-text-secondary">Notes</MudText>
-                <MudTextField @bind-Value="_notes" Lines="6" Variant="Variant.Outlined" Immediate="true"
-                              Margin="Margin.Dense" Class="my-2"
-                              Placeholder="Print settings, supports, what worked..." />
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
-                           Disabled="@(!NotesChanged)" OnClick="SaveNotes">Save notes</MudButton>
-            </MudPaper>
+            @if (_canEdit)
+            {
+                <MudPaper Outlined="true" Class="pa-4 mt-4">
+                    <MudText Typo="Typo.overline" Class="mud-text-secondary">Notes</MudText>
+                    <MudTextField @bind-Value="_notes" Lines="6" Variant="Variant.Outlined" Immediate="true"
+                                  Margin="Margin.Dense" Class="my-2"
+                                  Placeholder="Print settings, supports, what worked..." />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                               Disabled="@(!NotesChanged)" OnClick="SaveNotes">Save notes</MudButton>
+                </MudPaper>
+            }
+            else if (!string.IsNullOrWhiteSpace(_model.Notes))
+            {
+                <MudPaper Outlined="true" Class="pa-4 mt-4">
+                    <MudText Typo="Typo.overline" Class="mud-text-secondary">Notes</MudText>
+                    <MudText Typo="Typo.body2" Class="mt-2" Style="white-space:pre-wrap">@_model.Notes</MudText>
+                </MudPaper>
+            }
         </MudItem>
 
         <MudItem xs="12" md="5" lg="4">
+            @* A signed-out visitor sees what is recorded, not the form that
+               changes it. Every control below writes something shared. *@
+            @if (!_canEdit)
+            {
+                <MudPaper Outlined="true" Class="pa-4 mb-4">
+                    <MudText Typo="Typo.overline" Class="mud-text-secondary">Source</MudText>
+                    <MudSimpleTable Dense="true" Elevation="0" Class="mt-2">
+                        <tbody>
+                            <tr>
+                                <td class="mud-text-secondary">Designer</td>
+                                <td>@(_model.Designer?.Name ?? "—")</td>
+                            </tr>
+                            <tr>
+                                <td class="mud-text-secondary">License</td>
+                                <td>@(_model.License ?? "—")</td>
+                            </tr>
+                        </tbody>
+                    </MudSimpleTable>
+                </MudPaper>
+
+                @if (_model.Tags.Count > 0)
+                {
+                    <MudPaper Outlined="true" Class="pa-4 mb-4">
+                        <MudText Typo="Typo.overline" Class="mud-text-secondary">Tags</MudText>
+                        <div class="d-flex flex-wrap gap-1 mt-2">
+                            @foreach (var tag in _model.Tags.OrderBy(t => t.Name))
+                            {
+                                <MudChip T="string" Size="Size.Small" Class="ma-0" Color="Color.Primary"
+                                         Variant="Variant.Outlined">@tag.Name</MudChip>
+                            }
+                        </div>
+                    </MudPaper>
+                }
+            }
+            else
+            {
             <MudPaper Outlined="true" Class="pa-4 mb-4">
                 <MudText Typo="Typo.overline" Class="mud-text-secondary">Source</MudText>
 
@@ -207,10 +266,11 @@ else
                     </div>
                 }
             </MudPaper>
+            }
 
             @if (_paintsEnabled)
             {
-                <PaintSchemes ModelId="_model.Id" UserName="@_userName" @key="_model.Id" />
+                <PaintSchemes ModelId="_model.Id" UserName="@_userName" CanEdit="_canEdit" @key="_model.Id" />
             }
 
             <MudPaper Outlined="true" Class="pa-4">
@@ -240,6 +300,14 @@ else
     // an administrator has turned it on.
     private bool _paintsEnabled;
     private string? _userName;
+
+    /// <summary>
+    /// False for a signed-out visitor on a publicly readable instance. Every
+    /// control it hides writes something, and in Blazor Server a handler that
+    /// was never rendered cannot be invoked, so not drawing them is the guard
+    /// rather than a disguise for one.
+    /// </summary>
+    private bool _canEdit;
 
     private string _newTag = "";
     private string _notes = "";
@@ -322,6 +390,7 @@ else
         // rather than an opaque account id.
         var state = await AuthState.GetAuthenticationStateAsync();
         _userName = state.User.Identity?.Name;
+        _canEdit = state.User.Identity?.IsAuthenticated ?? false;
     }
 
     protected override async Task OnParametersSetAsync() => await LoadAsync();

@@ -6,15 +6,27 @@
 <MudPaper Outlined="true" Class="pa-4">
     <div class="d-flex align-center justify-space-between mb-1">
         <MudText Typo="Typo.overline" Class="mud-text-secondary">Painting</MudText>
-        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add"
-                   OnClick="CreateScheme">New scheme</MudButton>
+        @if (CanEdit)
+        {
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="CreateScheme">New scheme</MudButton>
+        }
     </div>
 
     @if (_schemes.Count == 0)
     {
         <MudText Typo="Typo.body2" Class="mud-text-secondary mt-2">
-            No schemes yet. A scheme is a recipe for painting this model &mdash; add one and it is
-            visible to everyone here, with your rack deciding whether you could follow it.
+            @if (CanEdit)
+            {
+                <text>
+                    No schemes yet. A scheme is a recipe for painting this model &mdash; add one and it
+                    is visible to everyone here, with your rack deciding whether you could follow it.
+                </text>
+            }
+            else
+            {
+                <text>Nobody has recorded a painting scheme for this model.</text>
+            }
         </MudText>
     }
 
@@ -32,7 +44,8 @@
                     </MudChip>
                 }
 
-                @if (scheme.Steps.Count > 0)
+                @* Only means anything to somebody with a rack of their own. *@
+                @if (scheme.Steps.Count > 0 && CanEdit)
                 {
                     @if (view.CanPaint)
                     {
@@ -54,7 +67,7 @@
 
                 <MudSpacer />
 
-                @if (view.IsMine)
+                @if (view.IsMine && CanEdit)
                 {
                     <MudTooltip Text="Add a step">
                         <MudIconButton Icon="@Icons.Material.Filled.PlaylistAdd" Size="Size.Small"
@@ -89,9 +102,9 @@
                         <div class="scheme-step">
                             <div class="paint-swatch" style="@Swatch(step)"></div>
                             <span class="scheme-step-technique">@(step.Technique ?? "Step")</span>
-                            <span class="@(missing ? "scheme-step-missing" : "")">@step.PaintName</span>
+                                <span class="@(missing && CanEdit ? "scheme-step-missing" : "")">@step.PaintName</span>
                             <span class="scheme-step-area">@step.Area</span>
-                            @if (view.IsMine)
+                            @if (view.IsMine && CanEdit)
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
                                                OnClick="@(() => RemoveStep(step.Id))" />
@@ -115,7 +128,7 @@
                                 <img src="@($"/photo/{photo.Id}")" loading="lazy" decoding="async"
                                      alt="@(photo.Caption ?? scheme.Name)" />
                             </a>
-                            @if (view.IsMine)
+                            @if (view.IsMine && CanEdit)
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
                                                Class="scheme-photo-remove"
@@ -139,6 +152,11 @@
 
     /// <summary>Shown against a scheme this account wrote, so a shared one has a face.</summary>
     [Parameter] public string? UserName { get; set; }
+
+    /// <summary>
+    /// False for a signed-out visitor, who may read every scheme and add none.
+    /// </summary>
+    [Parameter] public bool CanEdit { get; set; } = true;
 
     private List<SchemeView> _schemes = [];
     private string? _error;

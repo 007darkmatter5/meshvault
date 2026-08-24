@@ -7,6 +7,7 @@ using MeshVault.Core.Imaging;
 using MeshVault.Core.Meshes;
 using MeshVault.Web.Endpoints;
 using MudBlazor.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Server.Circuits;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics;
@@ -91,7 +92,12 @@ builder.Services.ConfigureApplicationCookie(o =>
 });
 
 builder.Services.AddAuthorizationBuilder()
-    .AddPolicy(Policies.Admin, policy => policy.RequireRole(Roles.Admin));
+    .AddPolicy(Policies.Admin, policy => policy.RequireRole(Roles.Admin))
+    .AddPolicy(Policies.View, policy => policy.AddRequirements(new ViewRequirement()));
+
+// Scoped, not singleton: it reads a setting from the database per request, so
+// turning public browsing off shuts the door immediately.
+builder.Services.AddScoped<IAuthorizationHandler, ViewHandler>();
 
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();

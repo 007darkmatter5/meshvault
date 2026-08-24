@@ -14,7 +14,18 @@
             </MudText>
         </MudLink>
 
+        @* A signed-out visitor on a publicly readable instance gets the two
+           pages that read the catalog and nothing that belongs to an account. *@
         <AuthorizeView Context="auth">
+            <NotAuthorized>
+                @if (PublicBrowsing)
+                {
+                    <MudNavLink Href="/browse" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.GridView"
+                                Class="topnav-link">Browse</MudNavLink>
+                    <MudNavLink Href="/designers" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.People"
+                                Class="topnav-link">Designers</MudNavLink>
+                }
+            </NotAuthorized>
             <Authorized>
                 <MudNavLink Href="/browse" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.GridView"
                             Class="topnav-link">Browse</MudNavLink>
@@ -85,8 +96,14 @@
     /// </remarks>
     private bool PaintsOn;
 
-    protected override async Task OnInitializedAsync() =>
+    /// <summary>Whether a signed-out visitor may read the catalog at all.</summary>
+    private bool PublicBrowsing;
+
+    protected override async Task OnInitializedAsync()
+    {
         PaintsOn = await Settings.GetBoolAsync(SettingKeys.PaintsEnabled);
+        PublicBrowsing = await Settings.GetBoolAsync(SettingKeys.PublicBrowsing);
+    }
 
     public static readonly MudTheme Theme = new()
     {

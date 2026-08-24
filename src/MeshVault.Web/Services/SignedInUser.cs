@@ -18,13 +18,17 @@ public class SignedInUser(IHttpContextAccessor accessor) : ICurrentUser
     {
         get
         {
-            var principal = accessor.HttpContext?.User;
-            var id = principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+            var id = Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
 
-            // Anonymous requests get the legacy id rather than throwing. Pages
-            // that matter are behind [Authorize]; media endpoints are not, and
-            // they must still be able to serve a thumbnail.
-            return string.IsNullOrEmpty(id) ? Users.LocalUserId : id;
+            // Anonymous requests get an id that owns nothing, rather than the
+            // legacy local id. Handing every visitor a real owner would show
+            // them somebody's collections and favorites, and make all of them
+            // one shared identity the moment public browsing is turned on.
+            return string.IsNullOrEmpty(id) ? Users.AnonymousId : id;
         }
     }
+
+    public bool IsAuthenticated => Principal?.Identity?.IsAuthenticated ?? false;
+
+    private ClaimsPrincipal? Principal => accessor.HttpContext?.User;
 }

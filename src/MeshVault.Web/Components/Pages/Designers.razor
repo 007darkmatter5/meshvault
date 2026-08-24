@@ -1,17 +1,21 @@
 @page "/designers"
-@attribute [Authorize]
+@attribute [Authorize(Policy = Policies.View)]
 @rendermode InteractiveServer
 @inject ModelCatalog Catalog
 @inject ModelEditor Editor
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthState
 
 <PageTitle>Designers - MeshVault</PageTitle>
 
 <div class="d-flex align-center justify-space-between mb-1">
     <MudText Typo="Typo.h5">Designers</MudText>
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd"
-               OnClick="Create">New designer</MudButton>
+    @if (_canEdit)
+    {
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd"
+                   OnClick="Create">New designer</MudButton>
+    }
 </div>
 <MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
     Everyone whose models you have. Assign a designer from a model's page; they appear here automatically.
@@ -26,8 +30,11 @@
             Open a model and set its designer to start building this list.
         </MudText>
         <div class="d-flex gap-2">
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Create"
-                       StartIcon="@Icons.Material.Filled.PersonAdd">New designer</MudButton>
+            @if (_canEdit)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Create"
+                           StartIcon="@Icons.Material.Filled.PersonAdd">New designer</MudButton>
+            }
             <MudButton Variant="Variant.Outlined" Href="/browse?missingDesigner=true">
                 Find models with no designer
             </MudButton>
@@ -74,10 +81,13 @@ else
                     </MudChip>
                 </MudTd>
                 <MudTd Style="text-align:right">
-                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
-                                   OnClick="@(() => Edit(context.Designer))" title="Edit designer" />
-                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                                   OnClick="@(() => Delete(context.Designer, context.Count))" title="Delete designer" />
+                    @if (_canEdit)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                       OnClick="@(() => Edit(context.Designer))" title="Edit designer" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => Delete(context.Designer, context.Count))" title="Delete designer" />
+                    }
                 </MudTd>
             </RowTemplate>
         </MudTable>
@@ -86,8 +96,14 @@ else
 
 @code {
     private List<(Designer Designer, int Count)> _designers = [];
+    private bool _canEdit;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthState.GetAuthenticationStateAsync();
+        _canEdit = state.User.Identity?.IsAuthenticated ?? false;
+        await LoadAsync();
+    }
 
     private async Task LoadAsync() => _designers = await Catalog.GetDesignersAsync();
 

@@ -38,4 +38,16 @@ public static class Users
     /// rows carrying this id get remapped to the first real account at that point.
     /// </summary>
     public const string LocalUserId = "local";
+
+    /// <summary>
+    /// Owner id for a visitor who is not signed in, used when public browsing
+    /// is turned on.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not <see cref="LocalUserId"/>. That id is a real owner with
+    /// real rows behind it, so handing it to every anonymous visitor would show
+    /// them one account's collections and favorites and let them all share a
+    /// single identity. This one owns nothing and never will.
+    /// </remarks>
+    public const string AnonymousId = "anonymous";
 }

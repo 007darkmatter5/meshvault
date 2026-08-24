@@ -59,6 +59,18 @@
 <MudPaper Outlined="true" Class="pa-5" Style="max-width:720px">
     <MudText Typo="Typo.h6" Class="mb-4">Features</MudText>
 
+    <MudSwitch T="bool" Value="_public" ValueChanged="SetPublic" Color="Color.Warning"
+               Label="Public browsing: anyone may read the catalog without signing in" />
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block ml-11">
+        Reading only. A signed-out visitor gets Browse, the model pages and the 3D viewer, and
+        cannot change, favorite, upload or organise anything. Collections, favorites and paint
+        racks belong to an account and stay hidden.
+    </MudText>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block ml-11 mt-2 mb-6">
+        Only turn this on if you are happy for whoever can reach this address to see your whole
+        library, including model notes.
+    </MudText>
+
     <MudSwitch T="bool" Value="_paints" ValueChanged="SetPaints" Color="Color.Primary"
                Label="Painting: paint racks and schemes" />
     <MudText Typo="Typo.caption" Class="mud-text-secondary d-block ml-11">
@@ -73,11 +85,24 @@
 
 @code {
     private bool _paints;
+    private bool _public;
 
     private void Go(string url) => Nav.NavigateTo(url);
 
-    protected override async Task OnInitializedAsync() =>
+    protected override async Task OnInitializedAsync()
+    {
         _paints = await Store.GetBoolAsync(SettingKeys.PaintsEnabled);
+        _public = await Store.GetBoolAsync(SettingKeys.PublicBrowsing);
+    }
+
+    private async Task SetPublic(bool on)
+    {
+        _public = on;
+        await Store.SetBoolAsync(SettingKeys.PublicBrowsing, on);
+        Snackbar.Add(
+            on ? "Anyone can now read this library without signing in" : "Public browsing turned off",
+            on ? Severity.Warning : Severity.Success);
+    }
 
     private async Task SetPaints(bool on)
     {
