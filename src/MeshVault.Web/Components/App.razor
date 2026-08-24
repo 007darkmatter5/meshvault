@@ -25,8 +25,23 @@
 
     <Routes />
     <ReconnectModal />
+
+    @* Every control in this app runs over a Blazor circuit. When one is never
+       established — a reverse proxy that will not pass WebSockets is the usual
+       cause — the prerendered HTML still paints a complete, correct-looking
+       page that silently ignores every click. ReconnectModal only covers a
+       circuit that connected and then dropped, so nothing said so. *@
+    <div id="offline-ui" data-nosnippet>
+        <span>
+            Not connected to the server, so buttons, dialogs and filters will not respond.
+        </span>
+        <a href="/diagnostics">What is wrong?</a>
+        <a href="." class="reload">Reload</a>
+    </div>
+
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+    <script src="@Assets["js/connection-check.js"]"></script>
 </body>
 
 </html>

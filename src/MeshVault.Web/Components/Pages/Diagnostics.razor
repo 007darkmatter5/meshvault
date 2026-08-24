@@ -1,0 +1,99 @@
+@page "/diagnostics"
+@attribute [Authorize(Policy = Policies.Admin)]
+@inject DiagnosticsReport Reports
+
+@* Statically rendered on purpose, like the sign-in pages. The fault this page
+   exists to diagnose is a circuit that never connects, and a page that needs a
+   circuit to say the circuit is missing would go blank exactly when it is
+   needed. Everything interactive here is plain JavaScript. *@
+
+<PageTitle>Diagnostics - MeshVault</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-1">
+    <MudText Typo="Typo.h5">Diagnostics</MudText>
+    <div class="diag-actions">
+        <button type="button" id="diag-copy" class="diag-button">Copy report</button>
+        <a href="/diagnostics" class="diag-button">Refresh</a>
+    </div>
+</div>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
+    A snapshot of this instance and of the browser showing it. Copy the report into a bug
+    report and it will answer most of the questions that would otherwise be asked.
+</MudText>
+
+<MudPaper Outlined="true" Class="pa-5 mb-4">
+    <MudText Typo="Typo.h6" Class="mb-1">Browser</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
+        Measured here, in this browser. If <em>Interactive rendering</em> fails, every button,
+        dialog and filter in MeshVault is dead no matter what the server reports.
+    </MudText>
+
+    <dl id="diag-browser" class="diag-list">
+        <dt>Checks</dt>
+        <dd class="diag-pending">… JavaScript has not run. That alone explains an unresponsive page.</dd>
+    </dl>
+</MudPaper>
+
+<MudPaper Outlined="true" Class="pa-5 mb-4">
+    <MudText Typo="Typo.h6" Class="mb-1">Server</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
+        Taken when this page was requested. Reload to take a fresh one.
+    </MudText>
+    <pre id="diag-report" class="diag-report">@_text</pre>
+</MudPaper>
+
+@if (_snapshot is { } snapshot)
+{
+    <MudPaper Outlined="true" Class="pa-5">
+        <MudText Typo="Typo.h6" Class="mb-1">Recent warnings and errors</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
+            The last @RecentEvents.Capacity logged at warning or above, newest first. Cleared when
+            the app restarts.
+        </MudText>
+
+        @if (snapshot.RecentEvents.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                Nothing has been logged at warning or above since startup.
+            </MudText>
+        }
+        else
+        {
+            <div class="diag-events">
+                @foreach (var entry in snapshot.RecentEvents)
+                {
+                    <div class="diag-event">
+                        <span class="diag-event-when">@entry.When.ToString("u")</span>
+                        <span class="diag-event-level @(entry.Level >= LogLevel.Error ? "diag-bad" : "diag-warn")">
+                            @entry.Level
+                        </span>
+                        <span class="diag-event-category">@entry.Category</span>
+                        <span class="diag-event-message">@entry.Message</span>
+                    </div>
+                }
+            </div>
+        }
+    </MudPaper>
+}
+
+<script src="@Assets["js/diagnostics.js"]"></script>
+
+@code {
+    private DiagnosticsSnapshot? _snapshot;
+    private string _text = "Collecting...";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _snapshot = await Reports.TakeAsync();
+            _text = DiagnosticsReport.ToText(_snapshot);
+        }
+        catch (Exception ex)
+        {
+            // This page is the last resort when something is already wrong, so
+            // it reports its own failure rather than throwing an error page.
+            _text = $"Could not collect the server report: {ex.GetType().Name}: {ex.Message}";
+        }
+    }
+}

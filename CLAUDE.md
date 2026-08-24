@@ -61,6 +61,21 @@ Interactivity is declared **per page** (`@rendermode InteractiveServer`), never 
 No test covers this. Manually exercise sign-in after changing `App.razor`, `Routes.razor`,
 `MainLayout.razor` or anything under `Components/Account/`.
 
+### Diagnosing an unresponsive UI
+
+A circuit that never connects looks exactly like working software: the prerendered HTML
+paints a complete page that ignores every click. `ReconnectModal` only covers a circuit
+that connected and then dropped, so `connection-check.js` shows a banner when one never
+arrives — `MudProviders` calls `meshvaultInteractive()` from `OnAfterRenderAsync` once
+`RendererInfo.IsInteractive`, and that island is on every page.
+
+`/diagnostics` is **statically rendered on purpose**, and its browser checks are plain
+JavaScript. A page that needed a circuit to report a missing circuit would go blank
+exactly when it was wanted. Keep it that way.
+
+The usual cause on a self-hosted box is a reverse proxy not passing WebSockets, which is
+why `/diag/ws` exists to test the upgrade without disturbing a live circuit.
+
 ### Per-user data
 
 `ICurrentUser.UserId` is the owner of collections and favorites, resolved from claims by

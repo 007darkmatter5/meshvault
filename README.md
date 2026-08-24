@@ -99,10 +99,57 @@ Every setting can be supplied as an environment variable using `__` for nesting.
 | `MeshVault__ScanOnStartup` | `true` | Scan libraries when the app starts |
 | `MeshVault__RescanIntervalHours` | `12` | Skip that scan if one ran this recently |
 
+Library settings can be changed after the fact from **Libraries** in the app, so the two
+`Libraries__0__*` variables above only matter on first run.
+
 ### Behind a reverse proxy
 
 Forwarded headers are honoured, so SWAG, Nginx Proxy Manager and Traefik work without
 extra configuration. Terminate TLS at the proxy and forward to port 8080.
+
+**Your proxy must pass WebSockets.** The whole UI runs over one, and several proxies ship
+with the upgrade switched off — in Nginx Proxy Manager it is the *Websockets Support*
+toggle, off by default. Without it every page still loads and looks completely normal, and
+every button, dialog and filter silently does nothing.
+
+### Behind Cloudflare
+
+Cloudflare Tunnel works, and passes WebSockets by default. Three of Cloudflare's optional
+features do break MeshVault, all with the same symptom — a page that looks perfect and
+ignores every click:
+
+- **Rocket Loader** (Speed → Optimization). It defers and reorders every script on the
+  page, including the one that starts Blazor. **Turn this off** for the hostname.
+  `/diagnostics` detects it and says so.
+- **Bot Fight Mode** (Security → Bots). It can challenge the `/_blazor` connection, which
+  no browser can answer on the app's behalf.
+- **"I'm Under Attack" mode**, for the same reason.
+
+A page rule or configuration rule scoped to the MeshVault hostname is enough; there is no
+need to change them account-wide.
+
+---
+
+## When something is not working
+
+Sign in as an administrator and open **Diagnostics** (`/diagnostics`).
+
+It is deliberately a plain, statically rendered page, so it still works when the rest of
+the app has gone unresponsive. It reports:
+
+- **Browser checks**, measured in the browser you are holding: whether Blazor and
+  MudBlazor loaded, whether the interactive connection is live, and whether a WebSocket
+  can be opened at all.
+- **Server report**: version, environment, uptime, whether `/data` is writable, whether
+  each library path is reachable from inside the container, catalog counts and preview
+  progress.
+- **Recent warnings and errors**, so you do not have to reach for `docker logs`.
+
+**Copy report** puts the lot on the clipboard, ready to paste into an issue.
+
+If MeshVault ever stops responding to clicks, a banner appears along the bottom of the
+page saying so and linking here — that state is almost always a proxy dropping the
+WebSocket rather than a broken feature.
 
 ---
 

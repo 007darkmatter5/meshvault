@@ -237,3 +237,77 @@ html, body {
     font-size: .9rem;
 }
 .topbar-account:hover { background: rgba(255, 255, 255, .07); text-decoration: none; }
+
+/* Connection banner ------------------------------------------------------- */
+
+/* Shown only when no circuit ever connected; connection-check.js sets the
+   attribute. Styled like the Blazor error bar so it reads as a system message
+   rather than part of the page. */
+#offline-ui {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    z-index: 20000;
+    padding: .8rem 1.25rem;
+    background: #ffefc2;
+    color: #1a1a1a;
+    font-size: .9rem;
+}
+#offline-ui[data-visible] { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+#offline-ui a { color: #1a1a1a; font-weight: 600; }
+
+/* Diagnostics ------------------------------------------------------------- */
+
+.diag-actions { display: flex; gap: 8px; }
+
+.diag-button {
+    display: inline-block;
+    padding: 6px 14px;
+    background: transparent;
+    border: 1px solid var(--mud-palette-lines-default, #2e333d);
+    border-radius: 8px;
+    color: var(--mud-palette-text-primary, #e6e8ec);
+    font: inherit;
+    font-size: .8rem;
+    cursor: pointer;
+    text-decoration: none;
+}
+.diag-button:hover { border-color: var(--mud-palette-primary, #4a9eff); text-decoration: none; }
+
+.diag-list {
+    display: grid;
+    grid-template-columns: minmax(150px, max-content) 1fr;
+    gap: 6px 20px;
+    margin: 0;
+    font-size: .85rem;
+}
+.diag-list dt { color: var(--mud-palette-text-secondary, #8b93a1); }
+.diag-list dd { margin: 0; font-family: ui-monospace, monospace; }
+
+.diag-ok { color: #7ddba4; }
+.diag-bad { color: #e05252; }
+.diag-warn { color: #f5c542; }
+.diag-pending { color: var(--mud-palette-text-secondary, #8b93a1); }
+
+.diag-report {
+    margin: 0;
+    font-family: ui-monospace, monospace;
+    font-size: .8rem;
+    line-height: 1.5;
+    white-space: pre;
+    overflow-x: auto;
+    color: var(--mud-palette-text-primary, #e6e8ec);
+}
+
+.diag-events { display: flex; flex-direction: column; gap: 4px; font-size: .8rem; }
+.diag-event {
+    display: grid;
+    grid-template-columns: max-content max-content minmax(120px, max-content) 1fr;
+    gap: 12px;
+    font-family: ui-monospace, monospace;
+}
+.diag-event-when { color: var(--mud-palette-text-secondary, #8b93a1); }
+.diag-event-category { color: var(--mud-palette-text-secondary, #8b93a1); overflow: hidden; text-overflow: ellipsis; }
+.diag-event-message { overflow-wrap: anywhere; }

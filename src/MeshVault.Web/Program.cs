@@ -7,6 +7,7 @@ using MeshVault.Core.Imaging;
 using MeshVault.Core.Meshes;
 using MeshVault.Web.Endpoints;
 using MudBlazor.Services;
+using Microsoft.AspNetCore.Components.Server.Circuits;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -105,6 +106,19 @@ builder.Services.AddScoped<ModelEditor>();
 builder.Services.AddSingleton<ScanService>();
 builder.Services.AddSingleton<ImportService>();
 builder.Services.AddSingleton<ForegroundActivity>();
+
+// Diagnostics: a bounded tail of warnings and errors, and a count of live
+// circuits, both read by /diagnostics.
+//
+// The buffer is constructed here rather than resolved, because the logging
+// provider is built before the container is and would otherwise end up holding
+// a different instance from the one the page reads.
+var recentEvents = new RecentEvents();
+builder.Services.AddSingleton(recentEvents);
+builder.Logging.AddProvider(new RecentEventsLoggerProvider(recentEvents));
+builder.Services.AddSingleton<CircuitTracker>();
+builder.Services.AddSingleton<CircuitHandler>(sp => sp.GetRequiredService<CircuitTracker>());
+builder.Services.AddScoped<DiagnosticsReport>();
 builder.Services.AddScoped<DatapackageImporter>();
 builder.Services.AddScoped<SettingsStore>();
 builder.Services.AddHostedService<StartupIndexer>();
@@ -138,13 +152,18 @@ app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages:
 app.Use(async (context, next) =>
 {
     if ((MediaEndpoints.IsMediaPath(context.Request.Path)
-         || context.Request.Path.StartsWithSegments("/health"))
+         || context.Request.Path.StartsWithSegments("/health")
+         || context.Request.Path.StartsWithSegments("/diag"))
         && context.Features.Get<IStatusCodePagesFeature>() is { } statusCodePages)
     {
         statusCodePages.Enabled = false;
     }
     await next();
 });
+
+// The diagnostics page probes this to tell whether the browser can hold a
+// WebSocket open at all, which Blazor Server needs and proxies commonly block.
+app.UseWebSockets();
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -153,6 +172,7 @@ app.UseAntiforgery();
 app.MapHealthEndpoint();
 app.MapMediaEndpoints();
 app.MapAccountEndpoints();
+app.MapDiagnosticsEndpoints();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

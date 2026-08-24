@@ -3,7 +3,36 @@
    so the layout and the sign-in pages can stay statically rendered. Sign-in
    writes a cookie, which an interactive component cannot do. *@
 
+@inject IJSRuntime JS
+
 <MudThemeProvider Theme="MainLayout.Theme" IsDarkMode="true" />
 <MudPopoverProvider />
 <MudDialogProvider CloseButton="true" MaxWidth="MaxWidth.Medium" FullWidth="true" />
 <MudSnackbarProvider />
+
+@code {
+    /// <summary>
+    /// Tells the page that a circuit reached the browser.
+    /// </summary>
+    /// <remarks>
+    /// This island is on every page, so it is the one place that knows
+    /// interactivity is genuinely working. Without the signal, a circuit that
+    /// never connects looks exactly like a working app whose buttons happen to
+    /// do nothing — the prerendered HTML is already on screen. App.razor shows a
+    /// banner if this has not fired.
+    /// </remarks>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !RendererInfo.IsInteractive) return;
+
+        try
+        {
+            await JS.InvokeVoidAsync("meshvaultInteractive");
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit went away between rendering and calling out. Nothing
+            // to announce, and nothing left to announce it to.
+        }
+    }
+}
