@@ -1,0 +1,71 @@
+@inject ModelEditor Editor
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Library settings</MudText>
+    </TitleContent>
+
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudTextField @bind-Value="Name" Label="Name" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Immediate="true" AutoFocus="true" OnKeyDown="OnKeyDown"
+                          HelperText="Shown wherever this library is listed." />
+
+            @* The path is fixed: models are stored relative to it, so changing
+               it here would orphan the library rather than move it. *@
+            <MudTextField Value="@Path" Label="Folder" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          ReadOnly="true" Disabled="true" T="string"
+                          HelperText="Remove and re-add the library to point it somewhere else." />
+
+            <MudSwitch @bind-Value="AllowOrganize" Color="Color.Warning"
+                       Label="Allow MeshVault to move and rename files in this folder" />
+
+            <MudAlert Severity="Severity.Info" Dense="true">
+                MeshVault indexes files where they are. Nothing writes into this folder today, so
+                this setting only records what you would permit. If the folder is mounted read-only
+                &mdash; the Unraid template mounts it that way by default &mdash; turning this on
+                still will not make it writable.
+            </MudAlert>
+
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="@(() => Dialog.Cancel())">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+
+    [Parameter] public int LibraryId { get; set; }
+    [Parameter] public string Name { get; set; } = "";
+    [Parameter] public string Path { get; set; } = "";
+    [Parameter] public bool AllowOrganize { get; set; }
+
+    private string? _error;
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await Save();
+    }
+
+    private async Task Save()
+    {
+        _error = null;
+        try
+        {
+            await Editor.UpdateLibraryAsync(LibraryId, Name, AllowOrganize);
+            Dialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+}

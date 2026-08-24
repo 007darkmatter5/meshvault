@@ -58,6 +58,10 @@
           Description="Path inside the container for the library. Leave as /models unless you changed the mount above."
           Type="Variable" Display="advanced" Required="false" Mask="false">/models</Config>
 
+  <Config Name="Allow Organize" Target="MeshVault__Libraries__0__AllowOrganize" Default="false" Mode=""
+          Description="Whether MeshVault may move and rename files in the library. Only takes effect on first run, when the library is created; afterwards change it on the Libraries page. The mount above must also be rw."
+          Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+
   <Config Name="Rescan Interval (hours)" Target="MeshVault__RescanIntervalHours" Default="12" Mode=""
           Description="Skip the startup scan if the library was scanned this recently. A full walk of a large library takes minutes. Set to 0 to always rescan on start."
           Type="Variable" Display="advanced" Required="false" Mask="false">12</Config>

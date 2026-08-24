@@ -387,6 +387,25 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
         return library;
     }
 
+    /// <summary>
+    /// Renames a library and changes whether MeshVault may organise it. The path
+    /// stays fixed: every model is recorded relative to it, so moving the root
+    /// would orphan the whole library rather than follow it.
+    /// </summary>
+    public async Task UpdateLibraryAsync(int libraryId, string name, bool allowOrganize,
+        CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var library = await db.Libraries.FirstOrDefaultAsync(l => l.Id == libraryId, ct);
+        if (library is null) return;
+
+        // An empty name would leave an unidentifiable row, so fall back to the
+        // folder name exactly as adding one does.
+        library.Name = string.IsNullOrWhiteSpace(name) ? Path.GetFileName(library.Path) : name.Trim();
+        library.AllowOrganize = allowOrganize;
+        await db.SaveChangesAsync(ct);
+    }
+
     public async Task RemoveLibraryAsync(int libraryId, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);

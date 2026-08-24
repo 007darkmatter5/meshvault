@@ -132,6 +132,10 @@
                 }
             </MudTd>
             <MudTd Style="text-align:right">
+                <MudTooltip Text="Rename this library or change what it allows">
+                    <MudIconButton Icon="@Icons.Material.Filled.Settings" Size="Size.Small"
+                                   OnClick="@(() => EditLibrary(context))" />
+                </MudTooltip>
                 <MudTooltip Text="Import titles and tags from datapackage.json sidecars">
                     <MudIconButton Icon="@Icons.Material.Filled.Downloading" Size="Size.Small"
                                    Disabled="@(Imports.IsRunning(context.Id) || Scans.IsRunning(context.Id))"
@@ -288,6 +292,24 @@
         finally
         {
             _adding = false;
+        }
+    }
+
+    private async Task EditLibrary(Library library)
+    {
+        var parameters = new DialogParameters<LibraryDialog>
+        {
+            { x => x.LibraryId, library.Id },
+            { x => x.Name, library.Name },
+            { x => x.Path, library.Path },
+            { x => x.AllowOrganize, library.AllowOrganize },
+        };
+
+        var dialog = await Dialogs.ShowAsync<LibraryDialog>("Library settings", parameters);
+        if ((await dialog.Result) is { Canceled: false })
+        {
+            await LoadAsync();
+            Snackbar.Add("Library updated", Severity.Success);
         }
     }
 
