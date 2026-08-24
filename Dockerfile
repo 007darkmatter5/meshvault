@@ -15,11 +15,27 @@ COPY MeshVault.slnx ./
 COPY src/MeshVault.Core/MeshVault.Core.csproj src/MeshVault.Core/
 COPY src/MeshVault.Data/MeshVault.Data.csproj src/MeshVault.Data/
 COPY src/MeshVault.Web/MeshVault.Web.csproj src/MeshVault.Web/
-RUN dotnet restore src/MeshVault.Web/MeshVault.Web.csproj -a "$TARGETARCH"
+RUN dotnet restore src/MeshVault.Web/MeshVault.Web.csproj
 
 COPY src/ src/
+
+# Plain, portable, framework-dependent publish — the same command that is run
+# and verified locally.
+#
+# This used to pass `-a $TARGETARCH --no-restore` and produced an image with no
+# wwwroot/_framework in it at all, though neither flag reproduced that on a
+# local publish, so this is removal of the difference rather than a diagnosis.
+#
+# Both were wrong here regardless. `-a` is Microsoft's cross-compilation
+# pattern and belongs with `FROM --platform=$BUILDPLATFORM`; without that pin
+# buildx already runs this stage as the target architecture, so the flag asked
+# for a second, redundant retarget. And the split restore ran without
+# -c Release, leaving publish to build a configuration it had not restored.
+#
+# A portable publish runs on either architecture unchanged, and the check below
+# proves the output is complete rather than trusting that it is.
 RUN dotnet publish src/MeshVault.Web/MeshVault.Web.csproj \
-    -c Release -a "$TARGETARCH" --no-restore -o /app \
+    -c Release -o /app \
     -p:SourceRevisionId="$SOURCE_COMMIT"
 
 # blazor.web.js is what turns the rendered HTML into a working application.
