@@ -24,6 +24,11 @@
         // work without a circuit, so warning there would be false alarm.
         if (document.querySelector('.auth-card')) return;
 
+        // Nor on the diagnostics page, which reports the same thing in more
+        // detail and is where the banner's own link points. Covering the report
+        // with a banner offering to explain it is no help.
+        if (document.getElementById('diag-browser')) return;
+
         const banner = document.getElementById('offline-ui');
         if (banner) banner.setAttribute('data-visible', '');
     }, grace);
