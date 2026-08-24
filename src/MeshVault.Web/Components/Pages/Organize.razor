@@ -1,0 +1,232 @@
+@page "/libraries/{LibraryId:int}/organize"
+@attribute [Authorize(Policy = Policies.Admin)]
+@rendermode InteractiveServer
+@inject ModelCatalog Catalog
+@inject OrganizePlanner Planner
+
+<PageTitle>Organize - MeshVault</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-1">
+    <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Href="/libraries" Size="Size.Small" />
+    <MudText Typo="Typo.h5">Organize @(_library?.Name ?? "library")</MudText>
+</div>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
+    Work out where every model would go. This page only ever reads: nothing is moved, renamed
+    or deleted by anything on it.
+</MudText>
+
+@if (_library is null)
+{
+    <MudAlert Severity="Severity.Warning">That library does not exist.</MudAlert>
+}
+else
+{
+    <MudGrid Spacing="4">
+        <MudItem xs="12" md="5" lg="4">
+            <MudPaper Outlined="true" Class="pa-5">
+                <MudStack Spacing="4">
+                    <MudTextField @bind-Value="_folderTemplate" Label="Folder for each model"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
+                                  DebounceInterval="400" OnDebounceIntervalElapsed="Replan"
+                                  Error="@(_folderProblems.Count > 0)"
+                                  ErrorText="@string.Join(", ", _folderProblems)"
+                                  HelperText="Slashes make folders. Relative to the library root." />
+
+                    <MudSwitch T="bool" Value="_renameFiles" ValueChanged="OnRenameToggled"
+                               Color="Color.Warning" Label="Also rename the files inside" />
+
+                    @if (_renameFiles)
+                    {
+                        <MudTextField @bind-Value="_fileTemplate" Label="Name for each file"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
+                                      DebounceInterval="400" OnDebounceIntervalElapsed="Replan"
+                                      Error="@(_fileProblems.Count > 0)"
+                                      ErrorText="@string.Join(", ", _fileProblems)"
+                                      HelperText="The extension is always kept." />
+
+                        <MudAlert Severity="Severity.Warning" Dense="true">
+                            Original file names often carry the only record that a mesh is
+                            pre-supported, or is version two. Keep <code>{file}</code> in the
+                            template and that survives.
+                        </MudAlert>
+                    }
+
+                    <div>
+                        <MudText Typo="Typo.overline" Class="mud-text-secondary">Tokens</MudText>
+                        <div class="organize-tokens mt-2">
+                            @foreach (var token in PathTemplate.ModelTokens)
+                            {
+                                <code>@("{" + token.Name + "}")</code>
+                                <span>@token.Description</span>
+                            }
+                            @if (_renameFiles)
+                            {
+                                @foreach (var token in PathTemplate.FileTokens)
+                                {
+                                    <code>@("{" + token.Name + "}")</code>
+                                    <span>@token.Description</span>
+                                }
+                            }
+                        </div>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+                            An empty value falls back to a placeholder such as "Unsorted", so nothing
+                            ends up loose at the root.
+                        </MudText>
+                    </div>
+                </MudStack>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="7" lg="8">
+            @if (_plan is null)
+            {
+                <MudSkeleton Height="200px" />
+            }
+            else
+            {
+                <MudGrid Class="mb-4" Spacing="3">
+                    <MudItem xs="6" sm="3">
+                        <StatCard Value="@_plan.Moving.ToString("N0")" Label="Would move"
+                                  Icon="@Icons.Material.Filled.DriveFileMove" />
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <StatCard Value="@_plan.AlreadyThere.ToString("N0")" Label="Already right"
+                                  Icon="@Icons.Material.Filled.Check" />
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <StatCard Value="@_plan.Colliding.ToString("N0")" Label="Clashing"
+                                  Icon="@Icons.Material.Filled.Warning" />
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <StatCard Value="@_plan.Renames.ToString("N0")" Label="File renames"
+                                  Icon="@Icons.Material.Filled.DriveFileRenameOutline" />
+                    </MudItem>
+                </MudGrid>
+
+                @if (_plan.Colliding > 0)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-4">
+                        @_plan.Colliding model(s) want a folder something else is already taking.
+                        They would be skipped. Renaming them, or giving them different designers,
+                        clears it.
+                    </MudAlert>
+                }
+
+                <MudPaper Outlined="true">
+                    <MudTable Items="_plan.Moves" Dense="true" Hover="true" Elevation="0"
+                              Breakpoint="Breakpoint.Sm" RowsPerPage="25"
+                              Filter="@(new Func<PlannedMove, bool>(Show))">
+                        <ToolBarContent>
+                            <MudText Typo="Typo.subtitle2">Every model</MudText>
+                            <MudSpacer />
+                            <MudSwitch @bind-Value="_onlyChanges" Color="Color.Primary" T="bool"
+                                       Label="Only what would change" />
+                        </ToolBarContent>
+                        <HeaderContent>
+                            <MudTh>Model</MudTh>
+                            <MudTh>Now</MudTh>
+                            <MudTh>Would become</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Model">
+                                <MudLink Href="@($"/model/{context.ModelId}")">
+                                    <MudText Typo="Typo.caption">@context.ModelName</MudText>
+                                </MudLink>
+                                @if (context.Renames.Count > 0)
+                                {
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                                        @context.Renames.Count file(s) renamed
+                                    </MudText>
+                                }
+                            </MudTd>
+                            <MudTd DataLabel="Now">
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary path-cell">
+                                    @context.From
+                                </MudText>
+                            </MudTd>
+                            <MudTd DataLabel="Would become">
+                                @switch (context.Outcome)
+                                {
+                                    case MoveOutcome.AlreadyThere:
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                            &mdash; already there
+                                        </MudText>
+                                        break;
+                                    case MoveOutcome.Collides:
+                                    case MoveOutcome.Unusable:
+                                        <MudTooltip Text="@context.Problem">
+                                            <MudText Typo="Typo.caption" Color="Color.Warning">
+                                                skipped &mdash; @context.Problem
+                                            </MudText>
+                                        </MudTooltip>
+                                        break;
+                                    default:
+                                        <MudText Typo="Typo.caption" Class="path-cell">@context.To</MudText>
+                                        break;
+                                }
+                            </MudTd>
+                        </RowTemplate>
+                        <PagerContent>
+                            <MudTablePager PageSizeOptions="new[] { 25, 50, 100 }" />
+                        </PagerContent>
+                    </MudTable>
+                </MudPaper>
+
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-4">
+                    Nothing above has happened. Applying a plan is not built yet: it will move real
+                    files, so it is being written separately, with every move recorded and undoable.
+                </MudAlert>
+            }
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter] public int LibraryId { get; set; }
+
+    private Library? _library;
+    private OrganizePlan? _plan;
+    private string _folderTemplate = "{designer}/{model}";
+    private string _fileTemplate = "{model} - {file}";
+    private bool _renameFiles;
+    private bool _onlyChanges = true;
+    private List<string> _folderProblems = [];
+    private List<string> _fileProblems = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _library = (await Catalog.GetLibrariesAsync()).FirstOrDefault(l => l.Id == LibraryId);
+        if (_library is not null) await Replan();
+    }
+
+    private async Task OnRenameToggled(bool value)
+    {
+        _renameFiles = value;
+        await Replan();
+    }
+
+    private async Task Replan()
+    {
+        // Unknown tokens are named rather than silently rendering as nothing,
+        // which would otherwise look like a template that simply did not work.
+        _folderProblems = PathTemplate.UnknownTokens(_folderTemplate, forFile: false)
+            .Select(t => $"There is no {{{t}}} token")
+            .ToList();
+
+        _fileProblems = _renameFiles
+            ? PathTemplate.UnknownTokens(_fileTemplate, forFile: true)
+                .Select(t => $"There is no {{{t}}} token")
+                .ToList()
+            : [];
+
+        _plan = await Planner.PlanAsync(LibraryId, new OrganizeRules
+        {
+            FolderTemplate = _folderTemplate,
+            FileTemplate = _fileTemplate,
+            RenameFiles = _renameFiles,
+        });
+    }
+
+    private bool Show(PlannedMove move) =>
+        !_onlyChanges || move.Outcome != MoveOutcome.AlreadyThere || move.Renames.Count > 0;
+}

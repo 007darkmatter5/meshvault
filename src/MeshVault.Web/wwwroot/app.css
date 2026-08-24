@@ -331,3 +331,17 @@ html, body {
     border-color: var(--mud-palette-primary) !important;
     box-shadow: 0 0 0 1px var(--mud-palette-primary);
 }
+
+/* Organize preview -------------------------------------------------------- */
+
+.organize-tokens {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 4px 12px;
+    font-size: .8rem;
+}
+.organize-tokens code {
+    font-family: ui-monospace, monospace;
+    color: var(--mud-palette-primary);
+}
+.organize-tokens span { color: var(--mud-palette-text-secondary); }

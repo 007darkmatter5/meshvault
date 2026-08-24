@@ -1,0 +1,181 @@
+using System.Text;
+
+namespace MeshVault.Core.Services;
+
+/// <summary>A token a template may use, and what to put there when it is empty.</summary>
+public record TemplateToken(string Name, string Description, string Fallback);
+
+/// <summary>
+/// Renders a folder or file name from a pattern like <c>{designer}/{model}</c>.
+/// </summary>
+/// <remarks>
+/// Every result becomes a real path on someone's disk, so rendering is
+/// deliberately paranoid: each segment is sanitised on its own, and a token can
+/// never introduce a path separator or climb out of the library with "..". A
+/// template is data typed by a user, and the library it is pointed at is
+/// usually irreplaceable.
+/// </remarks>
+public static class PathTemplate
+{
+    /// <summary>Tokens describing the model. Valid in both folder and file templates.</summary>
+    public static readonly IReadOnlyList<TemplateToken> ModelTokens =
+    [
+        new("model", "The model's name", "Unnamed"),
+        new("designer", "Who made it", "Unsorted"),
+        new("source", "Where it came from, such as MakerWorld", "Unknown source"),
+        new("collection", "Your first collection containing it", "Unfiled"),
+        new("tag", "Its first tag, alphabetically", "Untagged"),
+        new("year", "The year it was added to MeshVault", "Undated"),
+        new("license", "Its licence", "Unlicensed"),
+    ];
+
+    /// <summary>Extra tokens for naming a file inside a model's folder.</summary>
+    public static readonly IReadOnlyList<TemplateToken> FileTokens =
+    [
+        new("file", "The file's existing name, without its extension", "file"),
+        new("index", "Its position among the model's files, from 1", "1"),
+        new("kind", "Mesh, Cad, Image, Document and so on", "Other"),
+    ];
+
+    /// <summary>
+    /// Characters no mainstream filesystem will accept, plus the separators,
+    /// which a token must never be able to introduce.
+    /// </summary>
+    private static readonly char[] Illegal = ['<', '>', ':', '"', '|', '?', '*', '/', '\\'];
+
+    /// <summary>
+    /// Names Windows refuses whatever the extension, as devices rather than
+    /// files. A library organised on Linux still has to be readable from a
+    /// Windows machine over SMB, which is how most people reach an Unraid share.
+    /// </summary>
+    private static readonly string[] ReservedNames =
+    [
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+
+    /// <summary>
+    /// Long enough for a descriptive model name, short enough that a few nested
+    /// segments stay inside Windows' 260-character path limit.
+    /// </summary>
+    public const int MaxSegmentLength = 96;
+
+    /// <summary>Tokens the template uses that are not defined, in the order found.</summary>
+    public static List<string> UnknownTokens(string template, bool forFile)
+    {
+        var known = ModelTokens.Select(t => t.Name)
+            .Concat(forFile ? FileTokens.Select(t => t.Name) : [])
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var unknown = new List<string>();
+        foreach (var name in TokenNames(template))
+        {
+            if (!known.Contains(name) && !unknown.Contains(name, StringComparer.OrdinalIgnoreCase))
+                unknown.Add(name);
+        }
+        return unknown;
+    }
+
+    /// <summary>Every token named in a template, including repeats.</summary>
+    public static IEnumerable<string> TokenNames(string template)
+    {
+        for (var i = 0; i < template.Length; i++)
+        {
+            if (template[i] != '{') continue;
+
+            var close = template.IndexOf('}', i + 1);
+            if (close < 0) yield break;
+
+            yield return template[(i + 1)..close];
+            i = close;
+        }
+    }
+
+    /// <summary>
+    /// Renders a template into a relative path using forward slashes.
+    /// </summary>
+    /// <remarks>
+    /// An empty value falls back to the token's placeholder rather than
+    /// collapsing the segment, so a model with no designer lands somewhere
+    /// obvious instead of at the library root among the organised ones.
+    /// </remarks>
+    public static string Render(string template, IReadOnlyDictionary<string, string?> values, bool forFile)
+    {
+        var rendered = new StringBuilder();
+
+        for (var i = 0; i < template.Length; i++)
+        {
+            if (template[i] == '{')
+            {
+                var close = template.IndexOf('}', i + 1);
+                if (close > 0)
+                {
+                    rendered.Append(Value(template[(i + 1)..close], values, forFile));
+                    i = close;
+                    continue;
+                }
+            }
+
+            rendered.Append(template[i]);
+        }
+
+        // Split on both separators: someone typing a Windows-style template
+        // means the same thing by it.
+        var segments = rendered.ToString()
+            .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(Sanitize)
+            .Where(s => s.Length > 0)
+            .ToList();
+
+        return string.Join('/', segments);
+    }
+
+    private static string Value(string name, IReadOnlyDictionary<string, string?> values, bool forFile)
+    {
+        if (values.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value))
+        {
+            // Sanitised here, before the rendered text is split into segments,
+            // so a value can only ever fill the level the template gave it. A
+            // designer recorded as "Cinderwing3D/Dragons" must not quietly
+            // become two folders, and one recorded as ".." must not climb.
+            return Sanitize(value);
+        }
+
+        var token = ModelTokens.Concat(forFile ? FileTokens : [])
+            .FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase));
+
+        // An unknown token renders as nothing. UnknownTokens reports it to the
+        // user before they ever get here; silently leaving "{nonsense}" in a
+        // real folder name would be worse.
+        return token?.Fallback ?? "";
+    }
+
+    /// <summary>Makes one path segment safe on Windows, macOS and Linux alike.</summary>
+    public static string Sanitize(string segment)
+    {
+        var cleaned = new StringBuilder(segment.Length);
+        foreach (var c in segment)
+        {
+            // Control characters break some tools outright and are invisible in
+            // the ones they do not.
+            if (char.IsControl(c)) continue;
+            cleaned.Append(Illegal.Contains(c) ? '-' : c);
+        }
+
+        // "." and ".." would climb the tree rather than name anything.
+        var text = cleaned.ToString().Trim();
+        if (text.Length == 0 || text.All(c => c == '.')) return "";
+
+        // Windows silently strips trailing dots and spaces, so a folder created
+        // as "Model V2." can never be opened again by that name.
+        text = text.TrimEnd('.', ' ');
+
+        if (text.Length > MaxSegmentLength) text = text[..MaxSegmentLength].TrimEnd('.', ' ');
+
+        var stem = text.Split('.')[0];
+        if (ReservedNames.Contains(stem, StringComparer.OrdinalIgnoreCase)) text = "_" + text;
+
+        return text;
+    }
+}

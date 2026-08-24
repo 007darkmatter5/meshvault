@@ -132,6 +132,10 @@
                 }
             </MudTd>
             <MudTd Style="text-align:right">
+                <MudTooltip Text="Work out how this library could be laid out">
+                    <MudIconButton Icon="@Icons.Material.Filled.DriveFileMove" Size="Size.Small"
+                                   Href="@($"/libraries/{context.Id}/organize")" />
+                </MudTooltip>
                 <MudTooltip Text="Rename this library or change what it allows">
                     <MudIconButton Icon="@Icons.Material.Filled.Settings" Size="Size.Small"
                                    OnClick="@(() => EditLibrary(context))" />

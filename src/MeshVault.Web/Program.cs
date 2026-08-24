@@ -103,6 +103,7 @@ builder.Services.AddScoped<ICurrentUser, SignedInUser>();
 builder.Services.AddScoped<LibraryIndexer>();
 builder.Services.AddScoped<ModelCatalog>();
 builder.Services.AddScoped<ModelEditor>();
+builder.Services.AddScoped<OrganizePlanner>();
 builder.Services.AddSingleton<ScanService>();
 builder.Services.AddSingleton<ImportService>();
 builder.Services.AddSingleton<ForegroundActivity>();
