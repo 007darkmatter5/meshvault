@@ -1,0 +1,149 @@
+@inject PaintStore Paints
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(PaintId is null ? "Add a paint" : "Edit paint")</MudText>
+    </TitleContent>
+
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudTextField @bind-Value="Name" Label="Name" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Immediate="true" AutoFocus="true"
+                          Error="@string.IsNullOrWhiteSpace(Name)" ErrorText="A name is required"
+                          Placeholder="Mephiston Red" />
+
+            @* Both suggest rather than restrict. Ranges are renamed and
+               reissued constantly, and somebody always owns a brand no list
+               has heard of. *@
+            <div class="d-flex gap-3">
+                <MudAutocomplete T="string" Value="Brand" ValueChanged="OnBrandChanged"
+                                 SearchFunc="SearchBrands" Label="Brand" Variant="Variant.Outlined"
+                                 Margin="Margin.Dense" CoerceValue="true" Clearable="true"
+                                 Placeholder="Citadel" />
+
+                <MudAutocomplete T="string" @bind-Value="Range" SearchFunc="SearchRanges"
+                                 Label="Range" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                 CoerceValue="true" Clearable="true" Placeholder="Base"
+                                 HelperText="@RangeHelp" />
+            </div>
+
+            <div class="d-flex align-center gap-3">
+                <MudTextField @bind-Value="Hex" Label="Colour" Variant="Variant.Outlined"
+                              Margin="Margin.Dense" Immediate="true" Placeholder="#9a1115"
+                              HelperText="Used for the swatch beside each step." />
+                <div class="paint-swatch paint-swatch-large" style="@SwatchStyle"></div>
+            </div>
+
+            <div class="d-flex gap-3">
+                <MudSelect T="PaintFinish" @bind-Value="Finish" Label="Finish"
+                           Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var finish in Enum.GetValues<PaintFinish>())
+                    {
+                        <MudSelectItem T="PaintFinish" Value="@finish">@finish</MudSelectItem>
+                    }
+                </MudSelect>
+
+                <MudNumericField @bind-Value="Quantity" Label="Bottles" Variant="Variant.Outlined"
+                                 Margin="Margin.Dense" Min="0" Max="999"
+                                 HelperText="How many you own" />
+
+                <MudSelect T="PaintStock" @bind-Value="Stock" Label="Stock"
+                           Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem T="PaintStock" Value="PaintStock.Have">Have it</MudSelectItem>
+                    <MudSelectItem T="PaintStock" Value="PaintStock.Low">Running low</MudSelectItem>
+                    <MudSelectItem T="PaintStock" Value="PaintStock.Out">Out</MudSelectItem>
+                    <MudSelectItem T="PaintStock" Value="PaintStock.Want">Want it</MudSelectItem>
+                </MudSelect>
+            </div>
+
+            <MudTextField @bind-Value="Notes" Label="Notes" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Lines="2" Placeholder="Thin it heavily, two coats" />
+
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="@(() => Dialog.Cancel())">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@string.IsNullOrWhiteSpace(Name)" OnClick="Save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+
+    [Parameter] public int? PaintId { get; set; }
+    [Parameter] public string Name { get; set; } = "";
+    [Parameter] public string Brand { get; set; } = "";
+    [Parameter] public string Range { get; set; } = "";
+    [Parameter] public string Hex { get; set; } = "";
+    [Parameter] public PaintFinish Finish { get; set; }
+    [Parameter] public PaintStock Stock { get; set; }
+    [Parameter] public int Quantity { get; set; } = 1;
+    [Parameter] public string Notes { get; set; } = "";
+
+    private string? _error;
+
+    private string SwatchStyle =>
+        string.IsNullOrWhiteSpace(Hex) ? "background:transparent" : $"background:{Hex}";
+
+    private string RangeHelp =>
+        PaintBrands.Known.ContainsKey(Brand?.Trim() ?? "")
+            ? $"Ranges {Brand!.Trim()} makes."
+            : "The line within the brand, such as Base or Speedpaint.";
+
+    private Task<IEnumerable<string>> SearchBrands(string value, CancellationToken ct) =>
+        Task.FromResult(PaintBrands.Brands.Where(b =>
+            string.IsNullOrWhiteSpace(value) || b.Contains(value, StringComparison.OrdinalIgnoreCase)));
+
+    /// <summary>Narrowed to the chosen brand, because "Base" means Citadel's.</summary>
+    private Task<IEnumerable<string>> SearchRanges(string value, CancellationToken ct) =>
+        Task.FromResult(PaintBrands.RangesFor(Brand).Where(r =>
+            string.IsNullOrWhiteSpace(value) || r.Contains(value, StringComparison.OrdinalIgnoreCase)));
+
+    private void OnBrandChanged(string? brand)
+    {
+        var previous = Brand;
+        Brand = brand ?? "";
+
+        // Changing brand invalidates a range picked from the old one: Citadel's
+        // "Base" is not Vallejo's anything.
+        if (!string.Equals(previous, Brand, StringComparison.OrdinalIgnoreCase)
+            && !PaintBrands.RangesFor(Brand).Contains(Range, StringComparer.OrdinalIgnoreCase))
+        {
+            Range = "";
+        }
+    }
+
+    private async Task Save()
+    {
+        _error = null;
+        try
+        {
+            var paint = new Paint
+            {
+                Name = Name,
+                Brand = Brand,
+                Range = Range,
+                Hex = Hex,
+                Finish = Finish,
+                Stock = Stock,
+                Quantity = Quantity,
+                Notes = Notes,
+            };
+
+            if (PaintId is { } id) await Paints.UpdatePaintAsync(id, paint);
+            else await Paints.AddPaintAsync(paint);
+
+            Dialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+}

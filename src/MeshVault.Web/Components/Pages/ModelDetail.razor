@@ -4,6 +4,8 @@
 @inject ModelCatalog Catalog
 @inject ModelEditor Editor
 @inject ISnackbar Snackbar
+@inject SettingsStore Settings
+@inject AuthenticationStateProvider AuthState
 
 <PageTitle>@(_model?.Name ?? "Model") - MeshVault</PageTitle>
 
@@ -206,6 +208,11 @@ else
                 }
             </MudPaper>
 
+            @if (_paintsEnabled)
+            {
+                <PaintSchemes ModelId="_model.Id" UserName="@_userName" @key="_model.Id" />
+            }
+
             <MudPaper Outlined="true" Class="pa-4">
                 <MudText Typo="Typo.overline" Class="mud-text-secondary">Details</MudText>
                 <MudSimpleTable Dense="true" Elevation="0" Class="mt-2">
@@ -228,6 +235,11 @@ else
     private ModelEntry? _model => _card?.Model;
     private bool _loaded;
     private List<(Collection Collection, int Count)> _allCollections = [];
+
+    // Painting is optional and off by default, so the panel appears only when
+    // an administrator has turned it on.
+    private bool _paintsEnabled;
+    private string? _userName;
 
     private string _newTag = "";
     private string _notes = "";
@@ -300,6 +312,16 @@ else
         await Editor.ResetNameAsync(_model.Id);
         await LoadAsync();
         Snackbar.Add("Name reset to the folder name", Severity.Info);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _paintsEnabled = await Settings.GetBoolAsync(SettingKeys.PaintsEnabled);
+
+        // Recorded on any scheme written here, so a shared recipe has a face
+        // rather than an opaque account id.
+        var state = await AuthState.GetAuthenticationStateAsync();
+        _userName = state.User.Identity?.Name;
     }
 
     protected override async Task OnParametersSetAsync() => await LoadAsync();

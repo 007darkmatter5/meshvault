@@ -1,0 +1,76 @@
+@inject PaintStore Paints
+
+@* One instruction in a recipe: a paint, applied a way, somewhere. *@
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Add a step</MudText>
+    </TitleContent>
+
+    <DialogContent>
+        <MudStack Spacing="3">
+            @* Suggests from your own rack but accepts anything typed, so a
+               recipe can name a paint you have not bought yet. *@
+            <MudAutocomplete T="Paint" Value="_paint" ValueChanged="OnPaintChanged"
+                             SearchFunc="Search" ToStringFunc="@(p => p?.Name ?? "")"
+                             Label="Paint" Variant="Variant.Outlined" Margin="Margin.Dense"
+                             Clearable="true" ResetValueOnEmptyText="true"
+                             HelperText="From your rack, or type a name you do not own yet." />
+
+            <MudTextField @bind-Value="_typed" Label="...or write the paint name"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
+                          Disabled="@(_paint is not null)"
+                          Placeholder="Some Obscure Lacquer" />
+
+            <MudAutocomplete T="string" @bind-Value="_technique" SearchFunc="Techniques"
+                             Label="Technique" Variant="Variant.Outlined" Margin="Margin.Dense"
+                             CoerceValue="true" Clearable="true" Placeholder="Basecoat" />
+
+            <MudTextField @bind-Value="_area" Label="Area" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Placeholder="scales, wings, base" />
+        </MudStack>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="@(() => Dialog.Cancel())">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@(!HasPaint)" OnClick="Save">Add</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+
+    private static readonly string[] CommonTechniques =
+    [
+        "Primer", "Basecoat", "Wash", "Shade", "Layer", "Drybrush",
+        "Edge highlight", "Glaze", "Contrast", "Metallic", "Varnish",
+    ];
+
+    private Paint? _paint;
+    private string _typed = "";
+    private string? _technique;
+    private string _area = "";
+
+    private bool HasPaint => _paint is not null || !string.IsNullOrWhiteSpace(_typed);
+
+    private async Task<IEnumerable<Paint>> Search(string value, CancellationToken ct) =>
+        await Paints.SuggestAsync(value ?? "", 10, ct);
+
+    private Task<IEnumerable<string>> Techniques(string value, CancellationToken ct) =>
+        Task.FromResult(CommonTechniques.Where(t =>
+            string.IsNullOrWhiteSpace(value) || t.Contains(value, StringComparison.OrdinalIgnoreCase)));
+
+    private void OnPaintChanged(Paint? paint)
+    {
+        _paint = paint;
+        if (paint is not null) _typed = "";
+    }
+
+    private void Save()
+    {
+        if (!HasPaint) return;
+        Dialog.Close(DialogResult.Ok(
+            new StepDraft(_paint?.Id, _paint?.Name ?? _typed, _technique, _area)));
+    }
+}

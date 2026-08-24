@@ -51,13 +51,13 @@ public class PaintStoreTests : IDisposable
         _bob = new PaintStore(_factory, new FakeUser("bob"));
     }
 
-    private static Paint Pot(string name, string? hex = null, PaintStock stock = PaintStock.Have) =>
+    private static Paint Bottle(string name, string? hex = null, PaintStock stock = PaintStock.Have) =>
         new() { Name = name, Hex = hex, Stock = stock };
 
     [Fact]
     public async Task A_rack_is_private_to_its_owner()
     {
-        await _alice.AddPaintAsync(Pot("Mephiston Red"));
+        await _alice.AddPaintAsync(Bottle("Mephiston Red"));
 
         Assert.Single(await _alice.GetRackAsync());
         Assert.Empty(await _bob.GetRackAsync());
@@ -67,18 +67,18 @@ public class PaintStoreTests : IDisposable
     public async Task Two_people_can_each_own_the_same_paint()
     {
         // The unique index is per rack, not global.
-        await _alice.AddPaintAsync(Pot("Nuln Oil"));
-        await _bob.AddPaintAsync(Pot("Nuln Oil"));
+        await _alice.AddPaintAsync(Bottle("Nuln Oil"));
+        await _bob.AddPaintAsync(Bottle("Nuln Oil"));
 
         Assert.Single(await _alice.GetRackAsync());
         Assert.Single(await _bob.GetRackAsync());
     }
 
     [Fact]
-    public async Task Adding_a_pot_already_on_the_rack_does_not_duplicate_it()
+    public async Task Adding_a_bottle_already_on_the_rack_does_not_duplicate_it()
     {
-        await _alice.AddPaintAsync(Pot("Nuln Oil"));
-        await _alice.AddPaintAsync(Pot("NULN OIL"));
+        await _alice.AddPaintAsync(Bottle("Nuln Oil"));
+        await _alice.AddPaintAsync(Bottle("NULN OIL"));
 
         Assert.Single(await _alice.GetRackAsync());
     }
@@ -86,7 +86,7 @@ public class PaintStoreTests : IDisposable
     [Fact]
     public async Task One_person_cannot_delete_anothers_paint()
     {
-        var paint = await _alice.AddPaintAsync(Pot("Nuln Oil"));
+        var paint = await _alice.AddPaintAsync(Bottle("Nuln Oil"));
 
         await _bob.DeletePaintAsync(paint!.Id);
 
@@ -96,7 +96,7 @@ public class PaintStoreTests : IDisposable
     [Fact]
     public async Task Stock_can_be_changed_on_its_own()
     {
-        var paint = await _alice.AddPaintAsync(Pot("Nuln Oil"));
+        var paint = await _alice.AddPaintAsync(Bottle("Nuln Oil"));
 
         await _alice.SetStockAsync(paint!.Id, PaintStock.Out);
 
@@ -140,9 +140,9 @@ public class PaintStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task A_step_copies_the_paint_name_so_the_recipe_reads_without_the_pot()
+    public async Task A_step_copies_the_paint_name_so_the_recipe_reads_without_the_bottle()
     {
-        var paint = await _alice.AddPaintAsync(Pot("Mephiston Red", "#9a1115"));
+        var paint = await _alice.AddPaintAsync(Bottle("Mephiston Red", "#9a1115"));
         var scheme = await _alice.CreateSchemeAsync(1, "Red Dragon", null, "Alice");
 
         await _alice.AddStepAsync(scheme!.Id, paint!.Id, "", "Basecoat", "scales");
@@ -153,9 +153,9 @@ public class PaintStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task Throwing_a_pot_away_does_not_unpaint_the_model()
+    public async Task Throwing_a_bottle_away_does_not_unpaint_the_model()
     {
-        var paint = await _alice.AddPaintAsync(Pot("Mephiston Red", "#9a1115"));
+        var paint = await _alice.AddPaintAsync(Bottle("Mephiston Red", "#9a1115"));
         var scheme = await _alice.CreateSchemeAsync(1, "Red Dragon", null, "Alice");
         await _alice.AddStepAsync(scheme!.Id, paint!.Id, "", "Basecoat", "scales");
 
@@ -182,13 +182,13 @@ public class PaintStoreTests : IDisposable
     public async Task A_reader_is_told_what_they_would_have_to_buy()
     {
         // The point of a private rack next to a public scheme.
-        var red = await _alice.AddPaintAsync(Pot("Mephiston Red"));
-        var wash = await _alice.AddPaintAsync(Pot("Nuln Oil"));
+        var red = await _alice.AddPaintAsync(Bottle("Mephiston Red"));
+        var wash = await _alice.AddPaintAsync(Bottle("Nuln Oil"));
         var scheme = await _alice.CreateSchemeAsync(1, "Red Dragon", null, "Alice");
         await _alice.AddStepAsync(scheme!.Id, red!.Id, "", "Basecoat", "scales");
         await _alice.AddStepAsync(scheme.Id, wash!.Id, "", "Wash", "recesses");
 
-        await _bob.AddPaintAsync(Pot("Nuln Oil"));
+        await _bob.AddPaintAsync(Bottle("Nuln Oil"));
 
         var forAlice = Assert.Single(await _alice.GetSchemesAsync(1));
         Assert.True(forAlice.CanPaint);
@@ -202,7 +202,7 @@ public class PaintStoreTests : IDisposable
     [Fact]
     public async Task A_paint_you_have_run_out_of_counts_as_missing()
     {
-        var red = await _alice.AddPaintAsync(Pot("Mephiston Red"));
+        var red = await _alice.AddPaintAsync(Bottle("Mephiston Red"));
         var scheme = await _alice.CreateSchemeAsync(1, "Red Dragon", null, "Alice");
         await _alice.AddStepAsync(scheme!.Id, red!.Id, "", "Basecoat", "scales");
 
@@ -263,5 +263,93 @@ public class PaintStoreTests : IDisposable
         Assert.Null(await _alice.CreateSchemeAsync(9999, "Ghost", null, "Alice"));
     }
 
+
+    [Fact]
+    public async Task A_paint_you_only_want_does_not_count_as_owned()
+    {
+        // The point of recording the intention: a scheme needing it must still
+        // put it on the shopping list.
+        var red = await _alice.AddPaintAsync(Bottle("Mephiston Red"));
+        var scheme = await _alice.CreateSchemeAsync(1, "Red Dragon", null, "Alice");
+        await _alice.AddStepAsync(scheme!.Id, red!.Id, "", "Basecoat", "scales");
+
+        await _alice.SetStockAsync(red.Id, PaintStock.Want);
+
+        var view = Assert.Single(await _alice.GetSchemesAsync(1));
+        Assert.False(view.CanPaint);
+        Assert.Equal(["Mephiston Red"], view.Missing);
+    }
+
+    [Fact]
+    public async Task Running_low_still_counts_as_owned()
+    {
+        var red = await _alice.AddPaintAsync(Bottle("Mephiston Red"));
+        var scheme = await _alice.CreateSchemeAsync(1, "Red Dragon", null, "Alice");
+        await _alice.AddStepAsync(scheme!.Id, red!.Id, "", "Basecoat", "scales");
+
+        await _alice.SetStockAsync(red.Id, PaintStock.Low);
+
+        Assert.True(Assert.Single(await _alice.GetSchemesAsync(1)).CanPaint);
+    }
+
+    [Fact]
+    public async Task A_paint_holds_how_many_bottles_there_are()
+    {
+        var paint = await _alice.AddPaintAsync(new Paint { Name = "Mephiston Red", Quantity = 3 });
+
+        Assert.Equal(3, (await _alice.GetRackAsync())[0].Quantity);
+        Assert.Equal(3, paint!.Quantity);
+    }
+
+    [Fact]
+    public async Task A_paint_added_without_saying_holds_one()
+    {
+        await _alice.AddPaintAsync(Bottle("Nuln Oil"));
+
+        Assert.Equal(1, (await _alice.GetRackAsync())[0].Quantity);
+    }
+
+    [Fact]
+    public async Task Quantity_can_be_changed_on_its_own()
+    {
+        var paint = await _alice.AddPaintAsync(Bottle("Nuln Oil"));
+
+        await _alice.SetQuantityAsync(paint!.Id, 4);
+
+        Assert.Equal(4, (await _alice.GetRackAsync())[0].Quantity);
+    }
+
+    [Fact]
+    public async Task Quantity_never_goes_negative()
+    {
+        var paint = await _alice.AddPaintAsync(Bottle("Nuln Oil"));
+
+        await _alice.SetQuantityAsync(paint!.Id, -5);
+
+        Assert.Equal(0, (await _alice.GetRackAsync())[0].Quantity);
+    }
+
+    [Fact]
+    public async Task One_person_cannot_change_anothers_quantity()
+    {
+        var paint = await _alice.AddPaintAsync(new Paint { Name = "Nuln Oil", Quantity = 2 });
+
+        await _bob.SetQuantityAsync(paint!.Id, 99);
+
+        Assert.Equal(2, (await _alice.GetRackAsync())[0].Quantity);
+    }
+
+    [Fact]
+    public async Task Owning_none_of_a_paint_is_still_separate_from_being_out_of_it()
+    {
+        // Quantity and stock answer different questions, so neither is derived
+        // from the other: two bottles both nearly empty is Low with quantity 2.
+        var paint = await _alice.AddPaintAsync(new Paint { Name = "Nuln Oil", Quantity = 2, Stock = PaintStock.Low });
+
+        var rack = await _alice.GetRackAsync();
+        Assert.Equal(2, rack[0].Quantity);
+        Assert.Equal(PaintStock.Low, rack[0].Stock);
+        Assert.True(rack[0].Stock.IsOnTheShelf());
+    }
     public void Dispose() => _conn.Dispose();
 }

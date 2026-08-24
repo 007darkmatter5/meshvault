@@ -1,0 +1,314 @@
+@page "/paints"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject PaintStore Rack
+@inject SettingsStore Settings
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Paint rack - MeshVault</PageTitle>
+
+@if (!_enabled)
+{
+    <MudAlert Severity="Severity.Info">
+        Painting is turned off on this MeshVault. An administrator can turn it on in Settings.
+    </MudAlert>
+}
+else
+{
+    <div class="d-flex align-center justify-space-between mb-1">
+        <MudText Typo="Typo.h5">Paint rack</MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="Create">Add a paint</MudButton>
+    </div>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
+        What is on your shelf. This rack is yours alone &mdash; other accounts keep their own &mdash;
+        and it is what tells a painting scheme whether you could follow it.
+    </MudText>
+
+    @if (_paints.Count == 0)
+    {
+        <MudPaper Outlined="true" Class="pa-12 d-flex flex-column align-center gap-3">
+            <MudIcon Icon="@Icons.Material.Filled.Palette" Size="Size.Large" Class="mud-text-secondary" />
+            <MudText Typo="Typo.h6">No paints yet</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                Add the bottles you own and any scheme on a model will tell you what you are missing.
+            </MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Create"
+                       StartIcon="@Icons.Material.Filled.Add">Add a paint</MudButton>
+        </MudPaper>
+    }
+    else
+    {
+        <MudGrid Class="mb-4" Spacing="3">
+            <MudItem xs="6" sm="3"><StatCard Value="@OnShelf.ToString()" Label="On the shelf"
+                                             Icon="@Icons.Material.Filled.Palette" /></MudItem>
+            <MudItem xs="6" sm="3"><StatCard Value="@Count(PaintStock.Low).ToString()" Label="Running low"
+                                             Icon="@Icons.Material.Filled.Warning" /></MudItem>
+            <MudItem xs="6" sm="3"><StatCard Value="@Bottles.ToString()" Label="Bottles in total"
+                                             Icon="@Icons.Material.Filled.Inventory2" /></MudItem>
+            @* Out and wanted together: both are things to pick up, and a card
+               for each pushed the row onto a second line. *@
+            <MudItem xs="6" sm="3"><StatCard Value="@ToBuy.ToString()" Label="Shopping list"
+                                             Icon="@Icons.Material.Filled.ShoppingCart" /></MudItem>
+        </MudGrid>
+
+        @if (ToBuy > 0)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-4"
+                      Icon="@Icons.Material.Filled.ShoppingCart">
+                @ToBuy paint(s) to buy: @string.Join(", ", Shopping)
+            </MudAlert>
+        }
+
+        <MudPaper Outlined="true">
+            <MudTable Items="_paints" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm"
+                      Filter="@(new Func<Paint, bool>(Matches))">
+                <ToolBarContent>
+                    <div class="d-flex align-center gap-3 flex-wrap flex-grow-1">
+                        <MudTextField @bind-Value="_search" Placeholder="Search paints..." Immediate="true"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                                      Style="max-width:260px" />
+
+                        @* Built from the rack rather than the known-brands list,
+                           so it only ever offers brands actually owned. *@
+                        <MudSelect T="string" @bind-Value="_brand" Label="Brand" Clearable="true"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:200px">
+                            <MudSelectItem T="string" Value="@(null)">All brands</MudSelectItem>
+                            @foreach (var brand in Brands)
+                            {
+                                <MudSelectItem T="string" Value="@brand">@brand</MudSelectItem>
+                            }
+                        </MudSelect>
+
+                        <MudSelect T="PaintStock?" @bind-Value="_stock" Label="Stock" Clearable="true"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:180px">
+                            <MudSelectItem T="PaintStock?" Value="@(null)">Any stock</MudSelectItem>
+                            @foreach (var stock in Enum.GetValues<PaintStock>())
+                            {
+                                <MudSelectItem T="PaintStock?" Value="@stock">@Label(stock)</MudSelectItem>
+                            }
+                        </MudSelect>
+
+                        @if (_brand is not null || _stock is not null || !string.IsNullOrWhiteSpace(_search))
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Text"
+                                       StartIcon="@Icons.Material.Filled.FilterAltOff"
+                                       OnClick="ClearFilters">Clear</MudButton>
+                        }
+                    </div>
+                </ToolBarContent>
+                <HeaderContent>
+                    <MudTh></MudTh>
+                    <MudTh>Name</MudTh>
+                    <MudTh>Brand</MudTh>
+                    <MudTh>Finish</MudTh>
+                    <MudTh Style="text-align:center">Bottles</MudTh>
+                    <MudTh>Stock</MudTh>
+                    <MudTh Style="text-align:right">Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd Style="width:32px">
+                        <div class="paint-swatch" style="@Swatch(context)"></div>
+                    </MudTd>
+                    <MudTd DataLabel="Name">
+                        <MudText Typo="Typo.body2" Style="font-weight:600">@context.Name</MudText>
+                        @if (!string.IsNullOrWhiteSpace(context.Notes))
+                        {
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@context.Notes</MudText>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Brand">
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            @context.Brand@(string.IsNullOrWhiteSpace(context.Range) ? "" : $" · {context.Range}")
+                        </MudText>
+                    </MudTd>
+                    <MudTd DataLabel="Finish">
+                        @if (context.Finish != PaintFinish.Unspecified)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">
+                                @context.Finish
+                            </MudChip>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Bottles" Style="text-align:center">
+                        @* Buying another bottle is one click, not a trip through
+                           the whole form. *@
+                        <div class="paint-quantity">
+                            <MudIconButton Icon="@Icons.Material.Filled.Remove" Size="Size.Small"
+                                           Disabled="@(context.Quantity <= 0)"
+                                           OnClick="@(() => SetQuantity(context, context.Quantity - 1))" />
+                            <span class="@(context.Quantity == 0 ? "paint-quantity-none" : "")">
+                                @context.Quantity
+                            </span>
+                            <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small"
+                                           OnClick="@(() => SetQuantity(context, context.Quantity + 1))" />
+                        </div>
+                    </MudTd>
+                    <MudTd DataLabel="Stock">
+                        @* One click rather than a dialog: this is the edit made
+                           constantly, usually while standing at the shelf. *@
+                        <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
+                            @foreach (var stock in Enum.GetValues<PaintStock>())
+                            {
+                                var value = stock;
+                                <MudButton Color="@(context.Stock == value ? StockColor(value) : Color.Default)"
+                                           Variant="@(context.Stock == value ? Variant.Filled : Variant.Outlined)"
+                                           OnClick="@(() => SetStock(context, value))">
+                                    @Label(value)
+                                </MudButton>
+                            }
+                        </MudButtonGroup>
+                    </MudTd>
+                    <MudTd Style="text-align:right">
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                       OnClick="@(() => Edit(context))" title="Edit paint" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => Delete(context))" title="Remove from rack" />
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        </MudPaper>
+    }
+}
+
+@code {
+    private List<Paint> _paints = [];
+    private bool _enabled;
+    private string _search = "";
+    private string? _brand;
+    private PaintStock? _stock;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _enabled = await Settings.GetBoolAsync(SettingKeys.PaintsEnabled);
+        if (_enabled) await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _paints = await Rack.GetRackAsync();
+
+    private int Count(PaintStock stock) => _paints.Count(p => p.Stock == stock);
+
+    private int OnShelf => _paints.Count(p => p.Stock.IsOnTheShelf());
+
+    /// <summary>Actual bottles, not distinct colours: three of one red is three.</summary>
+    private int Bottles => _paints.Where(p => p.Stock.IsOnTheShelf()).Sum(p => p.Quantity);
+
+    /// <summary>Out and wanted alike: both are things to pick up next time.</summary>
+    private List<string> Shopping => _paints
+        .Where(p => p.Stock is PaintStock.Out or PaintStock.Want)
+        .OrderBy(p => p.Name)
+        .Select(p => p.Name)
+        .ToList();
+
+    private int ToBuy => Shopping.Count;
+
+    /// <summary>Brands actually on this rack, for the filter.</summary>
+    private List<string> Brands => _paints
+        .Select(p => p.Brand)
+        .Where(b => !string.IsNullOrWhiteSpace(b))
+        .Select(b => b!)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(b => b, StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    private bool Matches(Paint paint)
+    {
+        if (_brand is not null && !string.Equals(paint.Brand, _brand, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (_stock is { } stock && paint.Stock != stock) return false;
+
+        return string.IsNullOrWhiteSpace(_search)
+            || paint.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)
+            || (paint.Brand?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (paint.Range?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private void ClearFilters()
+    {
+        _search = "";
+        _brand = null;
+        _stock = null;
+    }
+
+    private async Task SetQuantity(Paint paint, int quantity)
+    {
+        await Rack.SetQuantityAsync(paint.Id, quantity);
+        paint.Quantity = Math.Clamp(quantity, 0, 999);
+    }
+
+    private static string Swatch(Paint paint) =>
+        string.IsNullOrWhiteSpace(paint.Hex) ? "background:transparent" : $"background:{paint.Hex}";
+
+    private static string Label(PaintStock stock) => stock switch
+    {
+        PaintStock.Have => "Have",
+        PaintStock.Low => "Low",
+        PaintStock.Out => "Out",
+        _ => "Want",
+    };
+
+    private static Color StockColor(PaintStock stock) => stock switch
+    {
+        PaintStock.Have => Color.Success,
+        PaintStock.Low => Color.Warning,
+        PaintStock.Out => Color.Error,
+        _ => Color.Info,
+    };
+
+    private async Task SetStock(Paint paint, PaintStock stock)
+    {
+        await Rack.SetStockAsync(paint.Id, stock);
+        paint.Stock = stock;
+    }
+
+    private async Task Create()
+    {
+        var dialog = await Dialogs.ShowAsync<PaintDialog>("Add a paint");
+        if ((await dialog.Result) is { Canceled: false })
+        {
+            await LoadAsync();
+            Snackbar.Add("Added to your rack", Severity.Success);
+        }
+    }
+
+    private async Task Edit(Paint paint)
+    {
+        var parameters = new DialogParameters<PaintDialog>
+        {
+            { x => x.PaintId, paint.Id },
+            { x => x.Name, paint.Name },
+            { x => x.Brand, paint.Brand ?? "" },
+            { x => x.Range, paint.Range ?? "" },
+            { x => x.Hex, paint.Hex ?? "" },
+            { x => x.Finish, paint.Finish },
+            { x => x.Stock, paint.Stock },
+            { x => x.Quantity, paint.Quantity },
+            { x => x.Notes, paint.Notes ?? "" },
+        };
+
+        var dialog = await Dialogs.ShowAsync<PaintDialog>("Edit paint", parameters);
+        if ((await dialog.Result) is { Canceled: false })
+        {
+            await LoadAsync();
+            Snackbar.Add("Paint updated", Severity.Success);
+        }
+    }
+
+    private async Task Delete(Paint paint)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync(
+            "Remove from rack?",
+            $"{paint.Name} comes off your rack. Schemes that used it keep the step, because "
+            + "running out of a paint does not un-paint the model.",
+            yesText: "Remove", noText: null, cancelText: "Cancel");
+
+        if (confirmed != true) return;
+
+        await Rack.DeletePaintAsync(paint.Id);
+        await LoadAsync();
+        Snackbar.Add($"Removed {paint.Name}", Severity.Info);
+    }
+}

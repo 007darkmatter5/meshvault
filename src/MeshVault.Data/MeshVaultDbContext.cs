@@ -95,7 +95,9 @@ public class MeshVaultDbContext(DbContextOptions<MeshVaultDbContext> options)
             e.Property(x => x.Brand).HasMaxLength(80);
             e.Property(x => x.Range).HasMaxLength(80);
             e.Property(x => x.Hex).HasMaxLength(9);
-            // One pot per name per rack. Two people may each own Mephiston Red.
+            // Racks recorded before quantity existed held one of each.
+            e.Property(x => x.Quantity).HasDefaultValue(1);
+            // One bottle per name per rack. Two people may each own Mephiston Red.
             e.HasIndex(x => new { x.OwnerId, x.NormalizedName }).IsUnique();
         });
 
@@ -119,7 +121,7 @@ public class MeshVaultDbContext(DbContextOptions<MeshVaultDbContext> options)
             e.HasOne(x => x.PaintScheme).WithMany(x => x.Steps)
                 .HasForeignKey(x => x.PaintSchemeId).OnDelete(DeleteBehavior.Cascade);
 
-            // Throwing a pot away edits an inventory. It must not quietly
+            // Throwing a bottle away edits an inventory. It must not quietly
             // rewrite every recipe that mentioned it, which is why the step
             // keeps the name and the link is allowed to go null.
             e.HasOne(x => x.Paint).WithMany(x => x.Steps)

@@ -22,7 +22,7 @@ public static class MediaEndpoints
     /// <summary>Refuse absurd uploads; a 400x300 PNG is a few tens of KB.</summary>
     private const int MaxSnapshotBytes = 4 * 1024 * 1024;
 
-    private static readonly string[] MediaPrefixes = ["/thumb", "/mesh", "/snapshot"];
+    private static readonly string[] MediaPrefixes = ["/thumb", "/mesh", "/snapshot", "/photo"];
 
     /// <summary>
     /// Whether a request is for binary media rather than a page. Used to keep
@@ -44,6 +44,7 @@ public static class MediaEndpoints
         media.MapGet("/thumb/file/{fileId:int}", GetFileThumbnail);
         media.MapGet("/mesh/{fileId:int}", GetMeshGeometry);
         media.MapPost("/snapshot/{modelId:int}", SaveSnapshot).DisableAntiforgery();
+        media.MapGet("/photo/{photoId:int}", GetSchemePhoto);
     }
 
     private static async Task<IResult> GetModelThumbnail(
@@ -140,6 +141,26 @@ public static class MediaEndpoints
         return Results.Bytes(payload, "application/octet-stream");
     }
 
+
+    /// <summary>
+    /// Serves a photo attached to a painting scheme. Schemes are readable by
+    /// everyone signed in, so this checks only that the row exists.
+    /// </summary>
+    private static async Task<IResult> GetSchemePhoto(
+        int photoId,
+        PaintStore paints,
+        PhotoStore store,
+        CancellationToken ct)
+    {
+        var photo = await paints.GetPhotoAsync(photoId, ct);
+        if (photo is null) return Results.NotFound();
+
+        var path = store.PathFor(photo.FileName);
+        if (!File.Exists(path)) return Results.NotFound();
+
+        return Results.File(path, photo.ContentType,
+            lastModified: File.GetLastWriteTimeUtc(path), enableRangeProcessing: false);
+    }
     private static async Task<IResult> SaveSnapshot(
         int modelId,
         HttpRequest request,

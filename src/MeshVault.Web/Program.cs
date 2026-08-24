@@ -104,6 +104,7 @@ builder.Services.AddScoped<LibraryIndexer>();
 builder.Services.AddScoped<ModelCatalog>();
 builder.Services.AddScoped<ModelEditor>();
 builder.Services.AddScoped<OrganizePlanner>();
+builder.Services.AddScoped<PaintStore>();
 builder.Services.AddSingleton<ScanService>();
 builder.Services.AddSingleton<ImportService>();
 builder.Services.AddSingleton<ForegroundActivity>();
@@ -126,6 +127,7 @@ builder.Services.AddHostedService<StartupIndexer>();
 
 builder.Services.AddSingleton(new ThumbnailStore(Path.Combine(dataPath, "thumbnails")));
 builder.Services.AddSingleton(new GeometryCache(Path.Combine(dataPath, "geometry")));
+builder.Services.AddSingleton(new PhotoStore(Path.Combine(dataPath, "photos")));
 builder.Services.AddSingleton<ThumbnailService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ThumbnailService>());
 

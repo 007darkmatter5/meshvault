@@ -1,11 +1,32 @@
 namespace MeshVault.Core.Models;
 
 /// <summary>How much of a paint is left, so a scheme can say what needs buying.</summary>
+/// <remarks>
+/// The numbers are fixed, not positional: they are already in people's
+/// databases, so a new state has to be appended rather than slotted in
+/// wherever it reads best.
+/// </remarks>
 public enum PaintStock
 {
     Have = 0,
-    Low,
-    Out,
+    Low = 1,
+    Out = 2,
+
+    /// <summary>
+    /// On the shopping list rather than the shelf. Counts as not owned, so a
+    /// scheme needing it still says so.
+    /// </summary>
+    Want = 3,
+}
+
+public static class PaintStocks
+{
+    /// <summary>
+    /// Whether a bottle in this state could actually be painted with today.
+    /// Running low still counts; out and wanted do not.
+    /// </summary>
+    public static bool IsOnTheShelf(this PaintStock stock) =>
+        stock is PaintStock.Have or PaintStock.Low;
 }
 
 public enum PaintFinish
@@ -22,11 +43,11 @@ public enum PaintFinish
 }
 
 /// <summary>
-/// One pot on somebody's shelf.
+/// One bottle on somebody's shelf.
 /// </summary>
 /// <remarks>
 /// Owned rather than shared: a paint rack is a physical thing a person owns,
-/// and two people in a house rarely share pots. Schemes are visible to
+/// and two people in a house rarely share bottles. Schemes are visible to
 /// everyone, so a paint referenced by one stays readable in that context even
 /// when it is not on your own shelf - which is what makes "you would need to
 /// buy these three" possible.
@@ -35,12 +56,12 @@ public class Paint
 {
     public int Id { get; set; }
 
-    /// <summary>The account whose rack this pot sits on.</summary>
+    /// <summary>The account whose rack this bottle sits on.</summary>
     public string OwnerId { get; set; } = Users.LocalUserId;
 
     public string Name { get; set; } = "";
 
-    /// <summary>Lower-cased name, for matching without duplicating a pot.</summary>
+    /// <summary>Lower-cased name, for matching without duplicating a bottle.</summary>
     public string NormalizedName { get; set; } = "";
 
     /// <summary>Citadel, Vallejo, Army Painter and so on.</summary>
@@ -54,6 +75,18 @@ public class Paint
 
     public PaintFinish Finish { get; set; }
     public PaintStock Stock { get; set; }
+
+    /// <summary>
+    /// How many bottles of it are on the shelf.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Stock"/> rather than derived from it. Two
+    /// bottles both a third full is "running low" with a quantity of two, and
+    /// one unopened bottle is "have" with a quantity of one; neither number can be
+    /// worked out from the other. Existing rows default to one, which is what
+    /// a rack recorded before this existed meant.
+    /// </remarks>
+    public int Quantity { get; set; } = 1;
 
     public string? Notes { get; set; }
     public DateTimeOffset AddedUtc { get; set; }
@@ -100,7 +133,7 @@ public class PaintStep
     public PaintScheme? PaintScheme { get; set; }
 
     /// <summary>
-    /// The pot used, when it is still on a rack this instance knows about.
+    /// The bottle used, when it is still on a rack this instance knows about.
     /// </summary>
     /// <remarks>
     /// Nullable, and paired with the name below, so deleting a paint edits an
@@ -111,7 +144,7 @@ public class PaintStep
 
     /// <summary>
     /// The paint's name as written when the step was recorded, kept even if the
-    /// pot is deleted or belongs to somebody else's rack.
+    /// bottle is deleted or belongs to somebody else's rack.
     /// </summary>
     public string PaintName { get; set; } = "";
 

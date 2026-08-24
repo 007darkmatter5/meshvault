@@ -345,3 +345,117 @@ html, body {
     color: var(--mud-palette-primary);
 }
 .organize-tokens span { color: var(--mud-palette-text-secondary); }
+
+/* Paints ------------------------------------------------------------------ */
+
+.paint-swatch {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border: 1px solid var(--mud-palette-lines-default);
+    flex: none;
+}
+.paint-swatch-large { width: 40px; height: 40px; }
+
+.scheme + .scheme { border-top: 1px solid var(--mud-palette-lines-default); padding-top: 12px; }
+
+.scheme-steps { display: flex; flex-direction: column; gap: 2px; }
+
+.scheme-step {
+    display: grid;
+    grid-template-columns: 18px 96px 1fr auto 32px;
+    align-items: center;
+    gap: 8px;
+    font-size: .8rem;
+}
+.scheme-step-technique { color: var(--mud-palette-text-secondary); }
+.scheme-step-area { color: var(--mud-palette-text-secondary); font-size: .75rem; }
+
+/* A paint the reader does not own, so a scheme says what to buy at a glance. */
+.scheme-step-missing {
+    color: var(--mud-palette-warning);
+    text-decoration: underline dotted;
+}
+
+.scheme-photos { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.scheme-photo { position: relative; }
+.scheme-photo img {
+    width: 110px;
+    height: 110px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid var(--mud-palette-lines-default);
+    display: block;
+}
+.scheme-photo-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    background: rgba(20, 22, 26, .7);
+}
+
+/* InputFile is invisible; the label is the button. */
+.scheme-upload {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 6px;
+    font-size: .75rem;
+    cursor: pointer;
+    color: var(--mud-palette-text-secondary);
+}
+.scheme-upload:hover { border-color: var(--mud-palette-primary); color: var(--mud-palette-primary); }
+.scheme-upload input { display: none; }
+
+/* Settings ---------------------------------------------------------------- */
+
+.settings-nav {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--mud-palette-lines-default);
+    padding-bottom: 8px;
+}
+
+.settings-nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: .85rem;
+    text-decoration: none;
+    color: var(--mud-palette-text-secondary);
+}
+.settings-nav-link:hover { background: rgba(255, 255, 255, .04); text-decoration: none; }
+.settings-nav-link.active {
+    color: var(--mud-palette-primary);
+    background: rgba(74, 158, 255, .12);
+}
+
+.settings-card {
+    cursor: pointer;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    transition: border-color .12s ease;
+}
+.settings-card:hover { border-color: var(--mud-palette-primary) !important; }
+
+.paint-quantity {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+.paint-quantity span {
+    min-width: 20px;
+    text-align: center;
+    font-size: .85rem;
+    font-weight: 600;
+}
+/* Owning none of something still on the rack is worth noticing. */
+.paint-quantity-none { color: var(--mud-palette-text-secondary); opacity: .6; }

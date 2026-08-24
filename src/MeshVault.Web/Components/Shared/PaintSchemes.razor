@@ -1,0 +1,242 @@
+@inject PaintStore Paints
+@inject PhotoStore Photos
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<MudPaper Outlined="true" Class="pa-4">
+    <div class="d-flex align-center justify-space-between mb-1">
+        <MudText Typo="Typo.overline" Class="mud-text-secondary">Painting</MudText>
+        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="CreateScheme">New scheme</MudButton>
+    </div>
+
+    @if (_schemes.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mt-2">
+            No schemes yet. A scheme is a recipe for painting this model &mdash; add one and it is
+            visible to everyone here, with your rack deciding whether you could follow it.
+        </MudText>
+    }
+
+    @foreach (var view in _schemes)
+    {
+        var scheme = view.Scheme;
+        <div class="scheme mt-4">
+            <div class="d-flex align-center gap-2 flex-wrap">
+                <MudText Typo="Typo.body1" Style="font-weight:600">@scheme.Name</MudText>
+
+                @if (!view.IsMine)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">
+                        by @(scheme.OwnerName ?? "someone else")
+                    </MudChip>
+                }
+
+                @if (scheme.Steps.Count > 0)
+                {
+                    @if (view.CanPaint)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined"
+                                 Icon="@Icons.Material.Filled.Check" Class="ma-0">
+                            You have every paint
+                        </MudChip>
+                    }
+                    else
+                    {
+                        <MudTooltip Text="@($"Missing: {string.Join(", ", view.Missing)}")">
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined"
+                                     Icon="@Icons.Material.Filled.ShoppingCart" Class="ma-0">
+                                @view.Missing.Count to buy
+                            </MudChip>
+                        </MudTooltip>
+                    }
+                }
+
+                <MudSpacer />
+
+                @if (view.IsMine)
+                {
+                    <MudTooltip Text="Add a step">
+                        <MudIconButton Icon="@Icons.Material.Filled.PlaylistAdd" Size="Size.Small"
+                                       OnClick="@(() => AddStep(scheme.Id))" />
+                    </MudTooltip>
+                    @* Blazor's own InputFile, styled as a button. MudFileUpload's
+                       activator slot did not resolve and Razor emits unresolved
+                       components as dead markup rather than failing the build. *@
+                    <label class="scheme-upload" title="Add a photo of how it turned out">
+                        <MudIcon Icon="@Icons.Material.Filled.AddAPhoto" Size="Size.Small" />
+                        <span>Photo</span>
+                        <InputFile OnChange="@(e => Upload(scheme.Id, e.File))" accept="image/*" />
+                    </label>
+                    <MudTooltip Text="Delete this scheme">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => DeleteScheme(scheme))" />
+                    </MudTooltip>
+                }
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(scheme.Notes))
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@scheme.Notes</MudText>
+            }
+
+            @if (scheme.Steps.Count > 0)
+            {
+                <div class="scheme-steps mt-2">
+                    @foreach (var step in scheme.Steps)
+                    {
+                        var missing = view.Missing.Contains(step.PaintName, StringComparer.OrdinalIgnoreCase);
+                        <div class="scheme-step">
+                            <div class="paint-swatch" style="@Swatch(step)"></div>
+                            <span class="scheme-step-technique">@(step.Technique ?? "Step")</span>
+                            <span class="@(missing ? "scheme-step-missing" : "")">@step.PaintName</span>
+                            <span class="scheme-step-area">@step.Area</span>
+                            @if (view.IsMine)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                               OnClick="@(() => RemoveStep(step.Id))" />
+                            }
+                            else
+                            {
+                                <span></span>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (scheme.Photos.Count > 0)
+            {
+                <div class="scheme-photos mt-3">
+                    @foreach (var photo in scheme.Photos)
+                    {
+                        <div class="scheme-photo">
+                            <a href="@($"/photo/{photo.Id}")" target="_blank">
+                                <img src="@($"/photo/{photo.Id}")" loading="lazy" decoding="async"
+                                     alt="@(photo.Caption ?? scheme.Name)" />
+                            </a>
+                            @if (view.IsMine)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                               Class="scheme-photo-remove"
+                                               OnClick="@(() => RemovePhoto(photo.Id))" />
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-3">@_error</MudAlert>
+    }
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public int ModelId { get; set; }
+
+    /// <summary>Shown against a scheme this account wrote, so a shared one has a face.</summary>
+    [Parameter] public string? UserName { get; set; }
+
+    private List<SchemeView> _schemes = [];
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync() => _schemes = await Paints.GetSchemesAsync(ModelId);
+
+    private static string Swatch(PaintStep step) =>
+        string.IsNullOrWhiteSpace(step.Hex) ? "background:transparent" : $"background:{step.Hex}";
+
+    private async Task CreateScheme()
+    {
+        var dialog = await Dialogs.ShowAsync<SchemeDialog>("New scheme");
+        if ((await dialog.Result) is not { Canceled: false, Data: SchemeDraft draft }) return;
+
+        await Paints.CreateSchemeAsync(ModelId, draft.Name, draft.Notes, UserName);
+        await LoadAsync();
+        Snackbar.Add("Scheme added", Severity.Success);
+    }
+
+    private async Task DeleteScheme(PaintScheme scheme)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync(
+            "Delete scheme?",
+            $"\"{scheme.Name}\" and its steps and photos are removed. Your paints are not touched.",
+            yesText: "Delete", noText: null, cancelText: "Cancel");
+
+        if (confirmed != true) return;
+
+        await Paints.DeleteSchemeAsync(scheme.Id);
+        await LoadAsync();
+        Snackbar.Add("Scheme deleted", Severity.Info);
+    }
+
+    private async Task AddStep(int schemeId)
+    {
+        var dialog = await Dialogs.ShowAsync<StepDialog>("Add a step");
+        if ((await dialog.Result) is not { Canceled: false, Data: StepDraft draft }) return;
+
+        await Paints.AddStepAsync(schemeId, draft.PaintId, draft.PaintName, draft.Technique, draft.Area);
+        await LoadAsync();
+    }
+
+    private async Task RemoveStep(int stepId)
+    {
+        await Paints.RemoveStepAsync(stepId);
+        await LoadAsync();
+    }
+
+    private async Task Upload(int schemeId, IBrowserFile? file)
+    {
+        _error = null;
+        if (file is null) return;
+
+        if (file.Size > PhotoStore.MaxBytes)
+        {
+            _error = $"That photo is {file.Size / 1048576:N0} MB. The limit is "
+                + $"{PhotoStore.MaxBytes / 1048576} MB.";
+            return;
+        }
+
+        if (!PhotoStore.IsAllowedType(file.ContentType))
+        {
+            _error = "Photos must be JPEG, PNG or WebP.";
+            return;
+        }
+
+        try
+        {
+            using var stream = file.OpenReadStream(PhotoStore.MaxBytes);
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            var bytes = buffer.ToArray();
+
+            // The declared type is whatever the browser felt like sending, and
+            // this file gets served back out again.
+            if (!PhotoStore.LooksLikeImage(bytes))
+            {
+                _error = "That file does not look like an image.";
+                return;
+            }
+
+            var fileName = await Photos.SaveAsync(bytes, file.ContentType);
+            await Paints.AddPhotoAsync(schemeId, fileName, file.ContentType, bytes.Length);
+
+            await LoadAsync();
+            Snackbar.Add("Photo added", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Could not add that photo: {ex.Message}";
+        }
+    }
+
+    private async Task RemovePhoto(int photoId)
+    {
+        if (await Paints.RemovePhotoAsync(photoId) is { } fileName) Photos.Delete(fileName);
+        await LoadAsync();
+    }
+}

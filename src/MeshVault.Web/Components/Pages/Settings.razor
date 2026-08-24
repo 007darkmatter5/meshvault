@@ -1,0 +1,79 @@
+@page "/settings"
+@attribute [Authorize(Policy = Policies.Admin)]
+@rendermode InteractiveServer
+@inject SettingsStore Store
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Settings - MeshVault</PageTitle>
+
+<SettingsNav />
+
+<MudText Typo="Typo.h5" Class="mb-1">Settings</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
+    Everything administrative. Deployment settings live in the container's environment instead.
+</MudText>
+
+<MudGrid Class="mb-6" Spacing="3">
+    <MudItem xs="12" sm="4">
+        <MudPaper Outlined="true" Class="pa-4 settings-card" @onclick="@(() => Go("/libraries"))">
+            <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Color="Color.Primary" />
+            <MudText Typo="Typo.body1" Style="font-weight:600">Libraries</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                Folders to scan, rescans, sidecar imports and preview building.
+            </MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <MudPaper Outlined="true" Class="pa-4 settings-card" @onclick="@(() => Go("/users"))">
+            <MudIcon Icon="@Icons.Material.Filled.ManageAccounts" Color="Color.Primary" />
+            <MudText Typo="Typo.body1" Style="font-weight:600">Accounts</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                Who can sign in, what they may do, and whether registration is open.
+            </MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <MudPaper Outlined="true" Class="pa-4 settings-card" @onclick="@(() => Go("/diagnostics"))">
+            <MudIcon Icon="@Icons.Material.Filled.MonitorHeart" Color="Color.Primary" />
+            <MudText Typo="Typo.body1" Style="font-weight:600">Diagnostics</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                What this instance sees, and a report to paste into a bug report.
+            </MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+<MudPaper Outlined="true" Class="pa-5" Style="max-width:720px">
+    <MudText Typo="Typo.h6" Class="mb-4">Features</MudText>
+
+    <MudSwitch T="bool" Value="_paints" ValueChanged="SetPaints" Color="Color.Primary"
+               Label="Painting: paint racks and schemes" />
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block ml-11">
+        Adds a paint rack for each account and lets models carry painting schemes, with photos
+        of how they turned out. Off by default, because most people cataloguing models do not
+        paint them and an unused feature is clutter on every model page.
+    </MudText>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block ml-11 mt-2">
+        Turning it off hides all of it. Nothing is deleted, and it comes back exactly as it was.
+    </MudText>
+</MudPaper>
+
+@code {
+    private bool _paints;
+
+    private void Go(string url) => Nav.NavigateTo(url);
+
+    protected override async Task OnInitializedAsync() =>
+        _paints = await Store.GetBoolAsync(SettingKeys.PaintsEnabled);
+
+    private async Task SetPaints(bool on)
+    {
+        _paints = on;
+        await Store.SetBoolAsync(SettingKeys.PaintsEnabled, on);
+
+        // The nav bar reads this on its own render, so a reload is the honest
+        // way to make the change visible everywhere at once.
+        Snackbar.Add(on ? "Painting turned on" : "Painting turned off", Severity.Success);
+    }
+}

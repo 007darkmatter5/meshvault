@@ -58,6 +58,7 @@ public class PaintStore(IDbContextFactory<MeshVaultDbContext> factory, ICurrentU
             Hex = Blank(paint.Hex),
             Finish = paint.Finish,
             Stock = paint.Stock,
+            Quantity = Math.Max(0, paint.Quantity),
             Notes = Blank(paint.Notes),
             AddedUtc = DateTimeOffset.UtcNow,
         };
@@ -82,6 +83,7 @@ public class PaintStore(IDbContextFactory<MeshVaultDbContext> factory, ICurrentU
         paint.Hex = Blank(changes.Hex);
         paint.Finish = changes.Finish;
         paint.Stock = changes.Stock;
+        paint.Quantity = Math.Max(0, changes.Quantity);
         paint.Notes = Blank(changes.Notes);
 
         await db.SaveChangesAsync(ct);
@@ -99,7 +101,22 @@ public class PaintStore(IDbContextFactory<MeshVaultDbContext> factory, ICurrentU
     }
 
     /// <summary>
-    /// Removes a pot from the rack. Schemes that used it keep the step, because
+    /// Sets how many bottles there are. Buying a second one is a one-click edit
+    /// rather than a trip through the whole form.
+    /// </summary>
+    public async Task SetQuantityAsync(int paintId, int quantity, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var owner = user.UserId;
+        var clamped = Math.Clamp(quantity, 0, 999);
+
+        await db.Paints
+            .Where(p => p.Id == paintId && p.OwnerId == owner)
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.Quantity, clamped), ct);
+    }
+
+    /// <summary>
+    /// Removes a bottle from the rack. Schemes that used it keep the step, because
     /// running out of a paint does not un-paint the model.
     /// </summary>
     public async Task DeletePaintAsync(int paintId, CancellationToken ct = default)
@@ -146,10 +163,15 @@ public class PaintStore(IDbContextFactory<MeshVaultDbContext> factory, ICurrentU
             .OrderByDescending(s => s.UpdatedUtc)
             .ToList();
 
-        // Matched by name, not by id: the step may point at somebody else's pot,
+        // Matched by name, not by id: the step may point at somebody else's bottle,
         // or at one that has since been thrown away.
+        //
+        // Only what is genuinely on the shelf counts. A paint marked "want" is
+        // on the shopping list, so a scheme needing it must still say so - that
+        // is the whole reason for recording the intention.
         var mine = await db.Paints.AsNoTracking()
-            .Where(p => p.OwnerId == owner && p.Stock != PaintStock.Out)
+            .Where(p => p.OwnerId == owner
+                && (p.Stock == PaintStock.Have || p.Stock == PaintStock.Low))
             .Select(p => p.NormalizedName)
             .ToListAsync(ct);
 
@@ -218,7 +240,7 @@ public class PaintStore(IDbContextFactory<MeshVaultDbContext> factory, ICurrentU
 
     /// <summary>
     /// Adds a step. The paint's name and swatch are copied onto it, so the
-    /// recipe still reads correctly to someone who does not own that pot.
+    /// recipe still reads correctly to someone who does not own that bottle.
     /// </summary>
     public async Task<PaintStep?> AddStepAsync(
         int schemeId, int? paintId, string paintName, string? technique, string? area,
@@ -278,6 +300,61 @@ public class PaintStore(IDbContextFactory<MeshVaultDbContext> factory, ICurrentU
         await db.SaveChangesAsync(ct);
     }
 
+
+    // Photos ------------------------------------------------------------------
+
+    /// <summary>
+    /// Records a photo against a scheme. The bytes are already on disk; this is
+    /// only the row that points at them.
+    /// </summary>
+    public async Task<SchemePhoto?> AddPhotoAsync(
+        int schemeId, string fileName, string contentType, long sizeBytes,
+        CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var scheme = await MineAsync(db, schemeId, ct);
+        if (scheme is null) return null;
+
+        var photo = new SchemePhoto
+        {
+            PaintSchemeId = schemeId,
+            FileName = fileName,
+            ContentType = contentType,
+            SizeBytes = sizeBytes,
+            AddedUtc = DateTimeOffset.UtcNow,
+        };
+
+        db.SchemePhotos.Add(photo);
+        scheme.UpdatedUtc = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return photo;
+    }
+
+    /// <summary>Returns the file name to delete from disk, or null if not allowed.</summary>
+    public async Task<string?> RemovePhotoAsync(int photoId, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var owner = user.UserId;
+
+        var photo = await db.SchemePhotos
+            .Include(p => p.PaintScheme)
+            .FirstOrDefaultAsync(p => p.Id == photoId, ct);
+
+        if (photo?.PaintScheme is null || photo.PaintScheme.OwnerId != owner) return null;
+
+        var fileName = photo.FileName;
+        db.SchemePhotos.Remove(photo);
+        photo.PaintScheme.UpdatedUtc = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return fileName;
+    }
+
+    /// <summary>A photo's file, for serving it. Readable by anyone: schemes are public.</summary>
+    public async Task<SchemePhoto?> GetPhotoAsync(int photoId, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        return await db.SchemePhotos.AsNoTracking().FirstOrDefaultAsync(p => p.Id == photoId, ct);
+    }
     /// <summary>The scheme, only if the caller wrote it.</summary>
     private async Task<PaintScheme?> MineAsync(MeshVaultDbContext db, int schemeId, CancellationToken ct)
     {
