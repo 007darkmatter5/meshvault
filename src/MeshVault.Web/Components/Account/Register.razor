@@ -128,7 +128,7 @@
 
         public string? DisplayName { get; set; }
 
-        [EmailAddress(ErrorMessage = "That does not look like an email address.")]
+        [OptionalEmailAddress(ErrorMessage = "That does not look like an email address.")]
         public string? Email { get; set; }
 
         [Required(ErrorMessage = "Choose a password.")]
