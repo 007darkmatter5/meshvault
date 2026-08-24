@@ -1,0 +1,26 @@
+@* Shared sub-navigation for the administrative pages, which live under
+   Settings rather than cluttering the app bar with things looked at once a
+   month.
+
+   Plain NavLinks rather than MudTabs: the diagnostics page is statically
+   rendered on purpose, so a tab strip that needs a circuit to switch would be
+   dead exactly where it is needed most. *@
+
+<nav class="settings-nav mb-6">
+    <NavLink href="/settings" Match="NavLinkMatch.All" class="settings-nav-link">
+        <MudIcon Icon="@Icons.Material.Filled.Tune" Size="Size.Small" />
+        <span>General</span>
+    </NavLink>
+    <NavLink href="/libraries" Match="NavLinkMatch.Prefix" class="settings-nav-link">
+        <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Small" />
+        <span>Libraries</span>
+    </NavLink>
+    <NavLink href="/users" Match="NavLinkMatch.Prefix" class="settings-nav-link">
+        <MudIcon Icon="@Icons.Material.Filled.ManageAccounts" Size="Size.Small" />
+        <span>Accounts</span>
+    </NavLink>
+    <NavLink href="/diagnostics" Match="NavLinkMatch.Prefix" class="settings-nav-link">
+        <MudIcon Icon="@Icons.Material.Filled.MonitorHeart" Size="Size.Small" />
+        <span>Diagnostics</span>
+    </NavLink>
+</nav>

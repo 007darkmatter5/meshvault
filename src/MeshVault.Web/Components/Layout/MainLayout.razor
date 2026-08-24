@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@inject SettingsStore Settings
 
 @* Statically rendered on purpose. Pages opt into interactivity individually,
    which lets the sign-in pages stay static so their form posts can be mapped
@@ -22,16 +23,21 @@
                             Class="topnav-link">Collections</MudNavLink>
                 <MudNavLink Href="/designers" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.People"
                             Class="topnav-link">Designers</MudNavLink>
+                @if (PaintsOn)
+                {
+                    <MudNavLink Href="/paints" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Palette"
+                                Class="topnav-link">Paints</MudNavLink>
+                }
             </Authorized>
         </AuthorizeView>
 
+        @* Libraries, accounts and diagnostics live under Settings rather than
+           in the bar. They are opened when something needs configuring or has
+           gone wrong, not while browsing, and four admin entries crowded out
+           the three that get used daily. *@
         <AuthorizeView Policy="@Policies.Admin" Context="admin">
-            <MudNavLink Href="/libraries" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.FolderOpen"
-                        Class="topnav-link">Libraries</MudNavLink>
-            <MudNavLink Href="/users" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.ManageAccounts"
-                        Class="topnav-link">Accounts</MudNavLink>
-            <MudNavLink Href="/diagnostics" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.MonitorHeart"
-                        Class="topnav-link">Diagnostics</MudNavLink>
+            <MudNavLink Href="/settings" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Settings"
+                        Class="topnav-link">Settings</MudNavLink>
         </AuthorizeView>
 
         <MudSpacer />
@@ -69,6 +75,19 @@
 </div>
 
 @code {
+    /// <summary>
+    /// Whether the painting feature is on, read once per page.
+    /// </summary>
+    /// <remarks>
+    /// The bar is statically rendered, so this is a single small query per
+    /// request rather than anything live: turning the feature on or off shows
+    /// up on the next navigation.
+    /// </remarks>
+    private bool PaintsOn;
+
+    protected override async Task OnInitializedAsync() =>
+        PaintsOn = await Settings.GetBoolAsync(SettingKeys.PaintsEnabled);
+
     public static readonly MudTheme Theme = new()
     {
         PaletteDark = new PaletteDark
