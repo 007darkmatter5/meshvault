@@ -18,6 +18,66 @@ public class ModelCatalog(IDbContextFactory<MeshVaultDbContext> factory, ICurren
         await using var db = await factory.CreateDbContextAsync(ct);
         var userId = user.UserId;
 
+        var models = Filtered(db, query, userId);
+
+        var total = await models.CountAsync(ct);
+
+        models = query.Sort switch
+        {
+            ModelSort.Newest => models.OrderByDescending(m => m.AddedUtc).ThenBy(m => m.Id),
+            ModelSort.Largest => models.OrderByDescending(m => m.TotalBytes).ThenBy(m => m.Id),
+            _ => models.OrderBy(m => m.Name).ThenBy(m => m.Id),
+        };
+
+        var page = Math.Max(1, query.Page);
+        var items = await models
+            .Skip((page - 1) * query.PageSize)
+            .Take(query.PageSize)
+            .Select(m => new ModelCard(m, m.Favorites.Any(f => f.UserId == userId)))
+            .ToListAsync(ct);
+
+        // Loaded separately so the projection above stays a single flat query.
+        var ids = items.Select(i => i.Model.Id).ToList();
+        var withRelations = await db.Models.AsNoTracking()
+            .Where(m => ids.Contains(m.Id))
+            .Include(m => m.Tags)
+            .Include(m => m.Files)
+            .Include(m => m.Designer)
+            .ToDictionaryAsync(m => m.Id, ct);
+
+        var cards = items
+            .Select(i => withRelations.TryGetValue(i.Model.Id, out var full)
+                ? i with { Model = full }
+                : i)
+            .ToList();
+
+        return new PagedResult<ModelCard>(cards, total, page, query.PageSize);
+    }
+
+    /// <summary>
+    /// Every model the query matches, ignoring paging.
+    /// </summary>
+    /// <remarks>
+    /// For "select everything that matches these filters" in the browser, where
+    /// the point is to act on the whole result rather than the page in front of
+    /// you. Ids only: a bulk edit needs nothing else, and the full result could
+    /// be the entire library.
+    /// </remarks>
+    public async Task<List<int>> GetMatchingIdsAsync(ModelQuery query, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        return await Filtered(db, query, user.UserId)
+            .OrderBy(m => m.Id)
+            .Select(m => m.Id)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// The filter half of a browse query, shared so that selecting everything
+    /// that matches cannot drift from what the page actually showed.
+    /// </summary>
+    private static IQueryable<ModelEntry> Filtered(MeshVaultDbContext db, ModelQuery query, string userId)
+    {
         var models = db.Models.AsNoTracking().AsQueryable();
 
         if (query.LibraryId is { } libraryId)
@@ -59,38 +119,7 @@ public class ModelCatalog(IDbContextFactory<MeshVaultDbContext> factory, ICurren
             models = models.Where(m => m.Tags.Any(t => t.NormalizedName == normalized));
         }
 
-        var total = await models.CountAsync(ct);
-
-        models = query.Sort switch
-        {
-            ModelSort.Newest => models.OrderByDescending(m => m.AddedUtc).ThenBy(m => m.Id),
-            ModelSort.Largest => models.OrderByDescending(m => m.TotalBytes).ThenBy(m => m.Id),
-            _ => models.OrderBy(m => m.Name).ThenBy(m => m.Id),
-        };
-
-        var page = Math.Max(1, query.Page);
-        var items = await models
-            .Skip((page - 1) * query.PageSize)
-            .Take(query.PageSize)
-            .Select(m => new ModelCard(m, m.Favorites.Any(f => f.UserId == userId)))
-            .ToListAsync(ct);
-
-        // Loaded separately so the projection above stays a single flat query.
-        var ids = items.Select(i => i.Model.Id).ToList();
-        var withRelations = await db.Models.AsNoTracking()
-            .Where(m => ids.Contains(m.Id))
-            .Include(m => m.Tags)
-            .Include(m => m.Files)
-            .Include(m => m.Designer)
-            .ToDictionaryAsync(m => m.Id, ct);
-
-        var cards = items
-            .Select(i => withRelations.TryGetValue(i.Model.Id, out var full)
-                ? i with { Model = full }
-                : i)
-            .ToList();
-
-        return new PagedResult<ModelCard>(cards, total, page, query.PageSize);
+        return models;
     }
 
     public async Task<ModelCard?> GetAsync(int id, CancellationToken ct = default)

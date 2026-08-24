@@ -1,0 +1,136 @@
+@inject ModelEditor Editor
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Edit @Count model@(Count == 1 ? "" : "s")</MudText>
+    </TitleContent>
+
+    <DialogContent>
+        <MudStack Spacing="4">
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                Leave anything blank to leave it alone. Nothing here removes a model or touches
+                a file on disk.
+            </MudText>
+
+            @* Designer ---------------------------------------------------- *@
+            <div>
+                <MudAutocomplete T="string" @bind-Value="_designer" SearchFunc="SearchDesigners"
+                                 Label="Set designer" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                 CoerceValue="true" Clearable="true" Disabled="@_clearDesigner"
+                                 HelperText="Pick an existing designer or type a new name." />
+                <MudCheckBox @bind-Value="_clearDesigner" Dense="true" Size="Size.Small"
+                             Label="Remove the designer instead" />
+            </div>
+
+            @* Tags -------------------------------------------------------- *@
+            <MudTextField @bind-Value="_tagsToAdd" Label="Add tags" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Placeholder="dragon, supported, resin"
+                          HelperText="Separate with commas. Tags already on a model are left as they are." />
+
+            <MudTextField @bind-Value="_tagsToRemove" Label="Remove tags" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Placeholder="wip, unsorted"
+                          HelperText="Separate with commas." />
+
+            @* Collection -------------------------------------------------- *@
+            @if (Collections.Count > 0)
+            {
+                <div>
+                    <MudSelect T="int?" @bind-Value="_collectionId" Label="Collection"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                        @foreach (var collection in Collections)
+                        {
+                            <MudSelectItem T="int?" Value="@collection.Id">@collection.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudCheckBox @bind-Value="_removeFromCollection" Dense="true" Size="Size.Small"
+                                 Label="Remove from it instead of adding" />
+                </div>
+            }
+            else
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    No collections yet. Make one from the Collections page and it will appear here.
+                </MudText>
+            }
+
+            @* Favorites --------------------------------------------------- *@
+            <MudSelect T="bool?" @bind-Value="_favorite" Label="Favorite" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Clearable="true"
+                       HelperText="Favorites are yours alone; other accounts keep theirs.">
+                <MudSelectItem T="bool?" Value="@(true)">Add to my favorites</MudSelectItem>
+                <MudSelectItem T="bool?" Value="@(false)">Remove from my favorites</MudSelectItem>
+            </MudSelect>
+
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="@(() => Dialog.Cancel())">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@(_applying || Edit.IsEmpty)" OnClick="Apply">
+            @(_applying ? "Applying..." : $"Apply to {Count}")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+
+    [Parameter, EditorRequired] public IReadOnlyCollection<int> ModelIds { get; set; } = [];
+    [Parameter] public List<Collection> Collections { get; set; } = [];
+
+    private string? _designer;
+    private bool _clearDesigner;
+    private string _tagsToAdd = "";
+    private string _tagsToRemove = "";
+    private int? _collectionId;
+    private bool _removeFromCollection;
+    private bool? _favorite;
+    private bool _applying;
+    private string? _error;
+
+    private int Count => ModelIds.Count;
+
+    private BulkEdit Edit => new()
+    {
+        DesignerName = _designer,
+        ClearDesigner = _clearDesigner,
+        TagsToAdd = Split(_tagsToAdd),
+        TagsToRemove = Split(_tagsToRemove),
+        CollectionId = _collectionId,
+        RemoveFromCollection = _removeFromCollection,
+        Favorite = _favorite,
+    };
+
+    private static List<string> Split(string raw) =>
+        raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    private async Task<IEnumerable<string>> SearchDesigners(string value, CancellationToken ct)
+    {
+        var designers = await Editor.SuggestDesignersAsync(value ?? "", 10, ct);
+        return designers.Select(d => d.Name);
+    }
+
+    private async Task Apply()
+    {
+        _error = null;
+        _applying = true;
+        try
+        {
+            var result = await Editor.ApplyBulkEditAsync(ModelIds, Edit);
+            Dialog.Close(DialogResult.Ok(result));
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _applying = false;
+        }
+    }
+}

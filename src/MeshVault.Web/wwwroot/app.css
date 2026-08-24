@@ -311,3 +311,23 @@ html, body {
 .diag-event-when { color: var(--mud-palette-text-secondary, #8b93a1); }
 .diag-event-category { color: var(--mud-palette-text-secondary, #8b93a1); overflow: hidden; text-overflow: ellipsis; }
 .diag-event-message { overflow-wrap: anywhere; }
+
+/* Selecting models for a bulk edit ---------------------------------------- */
+
+/* Sits over the card rather than inside its link, so ticking a box cannot also
+   navigate to the model. */
+.model-select {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    z-index: 2;
+    background: rgba(20, 22, 26, .75);
+    border-radius: 6px;
+}
+
+.model-card { position: relative; }
+
+.model-card-selected {
+    border-color: var(--mud-palette-primary) !important;
+    box-shadow: 0 0 0 1px var(--mud-palette-primary);
+}

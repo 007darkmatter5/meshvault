@@ -363,6 +363,213 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
         await db.SaveChangesAsync(ct);
     }
 
+    // Bulk editing ----------------------------------------------------------
+
+    /// <summary>
+    /// Applies one edit to many models at once.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not a loop over the single-model methods. Each of those
+    /// opens its own context and round-trips the database; over a few hundred
+    /// models that is thousands of queries against SQLite on a home server.
+    /// This resolves each tag and designer once and works in sets.
+    ///
+    /// An id that no longer exists is skipped rather than failing the edit. A
+    /// selection made before a rescan is expected to go slightly stale, and
+    /// quietly doing the rest is what was asked for.
+    /// </remarks>
+    public async Task<BulkEditResult> ApplyBulkEditAsync(
+        IReadOnlyCollection<int> modelIds, BulkEdit edit, CancellationToken ct = default)
+    {
+        if (modelIds.Count == 0 || edit.IsEmpty) return new BulkEditResult(0, 0, 0, 0, 0, 0);
+
+        var ids = modelIds.Distinct().ToList();
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var userId = user.UserId;
+
+        var designerChanged = 0;
+        var tagsAdded = 0;
+        var tagsRemoved = 0;
+        var collectionChanged = 0;
+        var favoritesChanged = 0;
+
+        // Designer ----------------------------------------------------------
+        if (edit.ClearDesigner)
+        {
+            designerChanged = await db.Models
+                .Where(m => ids.Contains(m.Id) && m.DesignerId != null)
+                .ExecuteUpdateAsync(s => s.SetProperty(m => m.DesignerId, (int?)null), ct);
+        }
+        else if (!string.IsNullOrWhiteSpace(edit.DesignerName))
+        {
+            var designer = await GetOrCreateDesignerAsync(db, edit.DesignerName, ct);
+            designerChanged = await db.Models
+                .Where(m => ids.Contains(m.Id) && m.DesignerId != designer.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(m => m.DesignerId, designer.Id), ct);
+        }
+
+        // Tags --------------------------------------------------------------
+        if (edit.TagsToAdd.Count > 0 || edit.TagsToRemove.Count > 0)
+        {
+            var models = await db.Models
+                .Include(m => m.Tags)
+                .Where(m => ids.Contains(m.Id))
+                .ToListAsync(ct);
+
+            foreach (var name in Normalize(edit.TagsToAdd))
+            {
+                var tag = await GetOrCreateTagAsync(db, name, ct);
+                foreach (var model in models.Where(m => m.Tags.All(t => t.Id != tag.Id)))
+                {
+                    model.Tags.Add(tag);
+                    tagsAdded++;
+                }
+            }
+
+            var removing = Normalize(edit.TagsToRemove)
+                .Select(n => n.ToLowerInvariant())
+                .ToHashSet();
+
+            foreach (var model in models)
+            {
+                foreach (var tag in model.Tags.Where(t => removing.Contains(t.NormalizedName)).ToList())
+                {
+                    model.Tags.Remove(tag);
+                    tagsRemoved++;
+                }
+            }
+
+            await db.SaveChangesAsync(ct);
+
+            // A tag that no longer labels anything would otherwise linger in
+            // the filter sidebar, which removing one at a time already avoids.
+            if (tagsRemoved > 0)
+            {
+                await db.Tags
+                    .Where(t => removing.Contains(t.NormalizedName) && !t.Models.Any())
+                    .ExecuteDeleteAsync(ct);
+            }
+        }
+
+        // Collection --------------------------------------------------------
+        if (edit.CollectionId is { } collectionId)
+        {
+            var collection = await db.Collections
+                .Include(c => c.Models)
+                .FirstOrDefaultAsync(c => c.Id == collectionId && c.OwnerId == userId, ct);
+
+            if (collection is not null)
+            {
+                if (edit.RemoveFromCollection)
+                {
+                    foreach (var model in collection.Models.Where(m => ids.Contains(m.Id)).ToList())
+                    {
+                        collection.Models.Remove(model);
+                        collectionChanged++;
+                    }
+                }
+                else
+                {
+                    var present = collection.Models.Select(m => m.Id).ToHashSet();
+                    var missing = await db.Models
+                        .Where(m => ids.Contains(m.Id) && !present.Contains(m.Id))
+                        .ToListAsync(ct);
+
+                    foreach (var model in missing)
+                    {
+                        collection.Models.Add(model);
+                        collectionChanged++;
+                    }
+                }
+
+                await db.SaveChangesAsync(ct);
+            }
+        }
+
+        // Favorites ---------------------------------------------------------
+        if (edit.Favorite is { } favorite)
+        {
+            if (favorite)
+            {
+                var already = await db.Favorites
+                    .Where(f => f.UserId == userId && ids.Contains(f.ModelEntryId))
+                    .Select(f => f.ModelEntryId)
+                    .ToListAsync(ct);
+
+                // Only for models that still exist. A favorite pointing at a
+                // model that has gone is unreachable and never cleaned up.
+                var existing = await db.Models
+                    .Where(m => ids.Contains(m.Id) && !already.Contains(m.Id))
+                    .Select(m => m.Id)
+                    .ToListAsync(ct);
+
+                foreach (var modelId in existing)
+                {
+                    db.Favorites.Add(new ModelFavorite
+                    {
+                        ModelEntryId = modelId,
+                        UserId = userId,
+                        CreatedUtc = DateTimeOffset.UtcNow,
+                    });
+                    favoritesChanged++;
+                }
+
+                await db.SaveChangesAsync(ct);
+            }
+            else
+            {
+                favoritesChanged = await db.Favorites
+                    .Where(f => f.UserId == userId && ids.Contains(f.ModelEntryId))
+                    .ExecuteDeleteAsync(ct);
+            }
+        }
+
+        return new BulkEditResult(
+            ids.Count, designerChanged, tagsAdded, tagsRemoved, collectionChanged, favoritesChanged);
+    }
+
+    /// <summary>Trimmed, de-duplicated case-insensitively, blanks dropped.</summary>
+    private static List<string> Normalize(IReadOnlyList<string> names) =>
+        names
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(n => n.Trim())
+            .DistinctBy(n => n.ToLowerInvariant())
+            .ToList();
+
+    private static async Task<Designer> GetOrCreateDesignerAsync(
+        MeshVaultDbContext db, string name, CancellationToken ct)
+    {
+        var trimmed = name.Trim();
+        var normalized = trimmed.ToLowerInvariant();
+
+        var designer = await db.Designers.FirstOrDefaultAsync(d => d.NormalizedName == normalized, ct);
+        if (designer is not null) return designer;
+
+        designer = new Designer
+        {
+            Name = trimmed,
+            NormalizedName = normalized,
+            CreatedUtc = DateTimeOffset.UtcNow,
+        };
+        db.Designers.Add(designer);
+        await db.SaveChangesAsync(ct);
+        return designer;
+    }
+
+    private static async Task<Tag> GetOrCreateTagAsync(
+        MeshVaultDbContext db, string name, CancellationToken ct)
+    {
+        var normalized = name.ToLowerInvariant();
+
+        var tag = await db.Tags.FirstOrDefaultAsync(t => t.NormalizedName == normalized, ct);
+        if (tag is not null) return tag;
+
+        tag = new Tag { Name = name, NormalizedName = normalized };
+        db.Tags.Add(tag);
+        await db.SaveChangesAsync(ct);
+        return tag;
+    }
+
     // Libraries -------------------------------------------------------------
 
     public async Task<Library> AddLibraryAsync(string name, string path, bool allowOrganize,

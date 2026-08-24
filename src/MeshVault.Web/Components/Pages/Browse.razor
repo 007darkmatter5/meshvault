@@ -5,6 +5,8 @@
 @implements IDisposable
 @inject ModelCatalog Catalog
 @inject ModelEditor Editor
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
 
 <PageTitle>MeshVault</PageTitle>
 
@@ -123,7 +125,52 @@
             {
                 <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
             }
+
+            <MudSpacer />
+
+            <MudButton Size="Size.Small" Variant="@(_selecting ? Variant.Filled : Variant.Outlined)"
+                       Color="@(_selecting ? Color.Primary : Color.Default)"
+                       StartIcon="@Icons.Material.Filled.Checklist"
+                       OnClick="ToggleSelecting">
+                @(_selecting ? "Done" : "Select")
+            </MudButton>
         </div>
+
+        @* The selection survives paging and filtering, so this bar has to say
+           how many are held rather than how many are on screen. *@
+        @if (_selecting)
+        {
+            <MudPaper Outlined="true" Class="pa-3 mb-4 d-flex align-center flex-wrap gap-2">
+                <MudText Typo="Typo.body2" Style="font-weight:600">
+                    @_selected.Count selected
+                </MudText>
+
+                <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="SelectPage"
+                           Disabled="@(_result is null || _result.Items.Count == 0)">
+                    Select this page
+                </MudButton>
+
+                @if (_result is { TotalCount: > 0 } result && result.TotalCount > result.Items.Count)
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="SelectAllMatching">
+                        Select all @result.TotalCount.ToString("N0") matching
+                    </MudButton>
+                }
+
+                <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="ClearSelection"
+                           Disabled="@(_selected.Count == 0)">
+                    Clear
+                </MudButton>
+
+                <MudSpacer />
+
+                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Edit"
+                           Disabled="@(_selected.Count == 0)" OnClick="OpenBulkEdit">
+                    Edit @_selected.Count
+                </MudButton>
+            </MudPaper>
+        }
 
         @if (_result is null)
         {
@@ -156,7 +203,18 @@
                 @foreach (var card in _result.Items)
                 {
                     var model = card.Model;
-                    <MudCard Outlined="true" Class="model-card" @key="model.Id">
+                    <MudCard Outlined="true" @key="model.Id"
+                             Class="@($"model-card{(_selected.Contains(model.Id) ? " model-card-selected" : "")}")">
+                        @if (_selecting)
+                        {
+                            @* Outside the anchor, so ticking a box cannot also
+                               navigate to the model. *@
+                            <div class="model-select">
+                                <MudCheckBox T="bool" Value="_selected.Contains(model.Id)" Dense="true"
+                                             Color="Color.Primary"
+                                             ValueChanged="@((bool on) => SetSelected(model.Id, on))" />
+                            </div>
+                        }
                         @* A real anchor rather than a click handler, so middle-click
                            and "open in new tab" behave as expected. *@
                         <a class="model-card-link" href="@($"/model/{model.Id}")">
@@ -275,6 +333,103 @@
         await LoadAsync();
     }
 
+    // Selecting and bulk editing ---------------------------------------------
+
+    private bool _selecting;
+
+    /// <summary>
+    /// Held across paging and filtering, so a selection can be gathered from
+    /// several searches before anything is applied to it. Ids rather than cards,
+    /// because a card off screen has been thrown away.
+    /// </summary>
+    private readonly HashSet<int> _selected = [];
+
+    private ModelQuery CurrentQuery() => new()
+    {
+        Search = _search,
+        LibraryId = _libraryId,
+        DesignerId = _designerId,
+        CollectionId = _collectionId,
+        SourceSite = _site,
+        Tags = _selectedTags.ToList(),
+        FavoritesOnly = _favoritesOnly,
+        MissingDesigner = _missingDesigner,
+        MissingSource = _missingSource,
+        Sort = _sort,
+        Page = _page,
+    };
+
+    private void ToggleSelecting()
+    {
+        _selecting = !_selecting;
+
+        // Leaving selection mode drops the selection. Keeping it invisibly
+        // would mean a later edit hitting models chosen and forgotten.
+        if (!_selecting) _selected.Clear();
+    }
+
+    private void SetSelected(int modelId, bool selected)
+    {
+        if (selected) _selected.Add(modelId);
+        else _selected.Remove(modelId);
+    }
+
+    private void SelectPage()
+    {
+        if (_result is null) return;
+        foreach (var card in _result.Items) _selected.Add(card.Model.Id);
+    }
+
+    private async Task SelectAllMatching()
+    {
+        // Asks the database rather than walking every page, so "tag all 400
+        // models by this designer" is one action instead of seven.
+        foreach (var id in await Catalog.GetMatchingIdsAsync(CurrentQuery())) _selected.Add(id);
+
+        Snackbar.Add($"{_selected.Count:N0} selected", Severity.Info);
+    }
+
+    private void ClearSelection() => _selected.Clear();
+
+    private async Task OpenBulkEdit()
+    {
+        if (_selected.Count == 0) return;
+
+        var parameters = new DialogParameters<BulkEditDialog>
+        {
+            { x => x.ModelIds, _selected.ToList() },
+            { x => x.Collections, _collections.Select(c => c.Collection).ToList() },
+        };
+
+        var dialog = await Dialogs.ShowAsync<BulkEditDialog>("Edit models", parameters);
+        if ((await dialog.Result) is not { Canceled: false, Data: BulkEditResult result }) return;
+
+        Snackbar.Add(Describe(result), result.ChangedNothing ? Severity.Info : Severity.Success);
+
+        // Facet counts and the cards themselves both moved.
+        await LoadFacetsAsync();
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// Says what actually changed rather than "done". A bulk edit that quietly
+    /// did nothing - every model already had that tag, say - is worth knowing
+    /// about, and the counts are the only way to tell.
+    /// </summary>
+    private static string Describe(BulkEditResult result)
+    {
+        if (result.ChangedNothing) return "Nothing to change; they were already like that.";
+
+        var parts = new List<string>();
+        if (result.DesignerChanged > 0) parts.Add($"designer on {result.DesignerChanged:N0}");
+        if (result.TagsAdded > 0) parts.Add($"{result.TagsAdded:N0} tag(s) added");
+        if (result.TagsRemoved > 0) parts.Add($"{result.TagsRemoved:N0} tag(s) removed");
+        if (result.CollectionChanged > 0) parts.Add($"collection on {result.CollectionChanged:N0}");
+        if (result.FavoritesChanged > 0) parts.Add($"{result.FavoritesChanged:N0} favorite(s)");
+
+        return $"Updated {result.Models:N0} model(s): {string.Join(", ", parts)}.";
+    }
+
     private async Task LoadFacetsAsync()
     {
         _libraries = await Catalog.GetLibrariesAsync();
@@ -308,20 +463,7 @@
         _loading = true;
         try
         {
-            var result = await Catalog.SearchAsync(new ModelQuery
-            {
-                Search = _search,
-                LibraryId = _libraryId,
-                DesignerId = _designerId,
-                CollectionId = _collectionId,
-                SourceSite = _site,
-                Tags = _selectedTags.ToList(),
-                FavoritesOnly = _favoritesOnly,
-                MissingDesigner = _missingDesigner,
-                MissingSource = _missingSource,
-                Sort = _sort,
-                Page = _page,
-            }, token);
+            var result = await Catalog.SearchAsync(CurrentQuery(), token);
 
             if (token.IsCancellationRequested) return;
             _result = result;
