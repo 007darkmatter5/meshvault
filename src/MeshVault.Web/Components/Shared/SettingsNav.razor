@@ -23,4 +23,9 @@
         <MudIcon Icon="@Icons.Material.Filled.MonitorHeart" Size="Size.Small" />
         <span>Diagnostics</span>
     </NavLink>
+    @* General matches exactly, so this deeper path does not light both up. *@
+    <NavLink href="/settings/paints" Match="NavLinkMatch.Prefix" class="settings-nav-link">
+        <MudIcon Icon="@Icons.Material.Filled.Palette" Size="Size.Small" />
+        <span>Paint brands</span>
+    </NavLink>
 </nav>

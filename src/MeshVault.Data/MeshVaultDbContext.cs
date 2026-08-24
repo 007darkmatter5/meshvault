@@ -101,6 +101,22 @@ public class MeshVaultDbContext(DbContextOptions<MeshVaultDbContext> options)
             e.HasIndex(x => new { x.OwnerId, x.NormalizedName }).IsUnique();
         });
 
+        b.Entity<PaintBrand>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(80);
+            e.HasIndex(x => x.NormalizedName).IsUnique();
+        });
+
+        b.Entity<PaintRange>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(80);
+            // A range name is only unique within its brand: several makers
+            // have something called "Base" or "Air".
+            e.HasIndex(x => new { x.PaintBrandId, x.NormalizedName }).IsUnique();
+            e.HasOne(x => x.Brand).WithMany(x => x.Ranges)
+                .HasForeignKey(x => x.PaintBrandId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         b.Entity<PaintScheme>(e =>
         {
             e.Property(x => x.OwnerId).HasMaxLength(450);
@@ -138,6 +154,8 @@ public class MeshVaultDbContext(DbContextOptions<MeshVaultDbContext> options)
         });
     }
 
+    public DbSet<PaintBrand> PaintBrands => Set<PaintBrand>();
+    public DbSet<PaintRange> PaintRanges => Set<PaintRange>();
     public DbSet<Paint> Paints => Set<Paint>();
     public DbSet<PaintScheme> PaintSchemes => Set<PaintScheme>();
     public DbSet<PaintStep> PaintSteps => Set<PaintStep>();

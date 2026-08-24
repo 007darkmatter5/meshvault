@@ -141,6 +141,136 @@ public class PaintStore(IDbContextFactory<MeshVaultDbContext> factory, ICurrentU
             .ToListAsync(ct);
     }
 
+    // Brands and ranges -------------------------------------------------------
+
+    /// <summary>
+    /// Every brand this instance knows, with its ranges.
+    /// </summary>
+    /// <remarks>
+    /// Shared rather than per-rack: Citadel is Citadel for everyone, and
+    /// curating the list once is the point. Administrators maintain it in
+    /// Settings; everyone reads it when adding a paint.
+    /// </remarks>
+    public async Task<List<PaintBrand>> GetBrandsAsync(CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        return await db.PaintBrands.AsNoTracking()
+            .Include(b => b.Ranges.OrderBy(r => r.Name))
+            .OrderBy(b => b.Name)
+            .ToListAsync(ct);
+    }
+
+    public async Task<PaintBrand?> AddBrandAsync(string name, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var trimmed = name.Trim();
+        var normalized = trimmed.ToLowerInvariant();
+
+        var existing = await db.PaintBrands.FirstOrDefaultAsync(b => b.NormalizedName == normalized, ct);
+        if (existing is not null) return existing;
+
+        var brand = new PaintBrand { Name = trimmed, NormalizedName = normalized };
+        db.PaintBrands.Add(brand);
+        await db.SaveChangesAsync(ct);
+        return brand;
+    }
+
+    public async Task RenameBrandAsync(int brandId, string name, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var brand = await db.PaintBrands.FirstOrDefaultAsync(b => b.Id == brandId, ct);
+        if (brand is null) return;
+
+        brand.Name = name.Trim();
+        brand.NormalizedName = brand.Name.ToLowerInvariant();
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Removes a brand and its ranges. Paints already recorded against it keep
+    /// the text they were given, because this list is a set of suggestions and
+    /// not the record of what is on anyone's shelf.
+    /// </summary>
+    public async Task DeleteBrandAsync(int brandId, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.PaintBrands.Where(b => b.Id == brandId).ExecuteDeleteAsync(ct);
+    }
+
+    public async Task<PaintRange?> AddRangeAsync(int brandId, string name, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+
+        await using var db = await factory.CreateDbContextAsync(ct);
+        if (!await db.PaintBrands.AnyAsync(b => b.Id == brandId, ct)) return null;
+
+        var trimmed = name.Trim();
+        var normalized = trimmed.ToLowerInvariant();
+
+        var existing = await db.PaintRanges
+            .FirstOrDefaultAsync(r => r.PaintBrandId == brandId && r.NormalizedName == normalized, ct);
+        if (existing is not null) return existing;
+
+        var range = new PaintRange
+        {
+            PaintBrandId = brandId,
+            Name = trimmed,
+            NormalizedName = normalized,
+        };
+
+        db.PaintRanges.Add(range);
+        await db.SaveChangesAsync(ct);
+        return range;
+    }
+
+    public async Task DeleteRangeAsync(int rangeId, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.PaintRanges.Where(r => r.Id == rangeId).ExecuteDeleteAsync(ct);
+    }
+
+    /// <summary>
+    /// Range names to offer for a brand.
+    /// </summary>
+    /// <remarks>
+    /// Narrowed to the named brand, which is the whole reason ranges belong to
+    /// one. A brand that is blank or not on the list offers nothing rather than
+    /// everything: suggesting Citadel's ranges for a brand that is not Citadel
+    /// is worse than suggesting none.
+    /// </remarks>
+    public async Task<List<string>> RangesForAsync(string? brand, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(brand)) return [];
+
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var normalized = brand.Trim().ToLowerInvariant();
+
+        return await db.PaintRanges.AsNoTracking()
+            .Where(r => r.Brand!.NormalizedName == normalized)
+            .OrderBy(r => r.Name)
+            .Select(r => r.Name)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>Brand names to offer, narrowed by what has been typed so far.</summary>
+    public async Task<List<string>> SuggestBrandsAsync(
+        string prefix, int limit = 20, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var term = (prefix ?? "").Trim().ToLowerInvariant();
+
+        return await db.PaintBrands.AsNoTracking()
+            .Where(b => term == "" || EF.Functions.Like(b.NormalizedName, $"%{term}%"))
+            .OrderBy(b => b.Name)
+            .Take(limit)
+            .Select(b => b.Name)
+            .ToListAsync(ct);
+    }
+
     // Schemes -----------------------------------------------------------------
 
     /// <summary>

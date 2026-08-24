@@ -1,0 +1,35 @@
+@* Asks for one line of text. Small enough to be worth having rather than a
+   bespoke dialog per field. *@
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="Value" Label="@Label" Variant="Variant.Outlined"
+                      Margin="Margin.Dense" Immediate="true" AutoFocus="true"
+                      OnKeyDown="OnKeyDown"
+                      Error="@string.IsNullOrWhiteSpace(Value)" ErrorText="Required" />
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="@(() => Dialog.Cancel())">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@string.IsNullOrWhiteSpace(Value)" OnClick="Save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+
+    [Parameter] public string Label { get; set; } = "Name";
+    [Parameter] public string Value { get; set; } = "";
+
+    private void Save()
+    {
+        if (string.IsNullOrWhiteSpace(Value)) return;
+        Dialog.Close(DialogResult.Ok(Value.Trim()));
+    }
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") Save();
+    }
+}

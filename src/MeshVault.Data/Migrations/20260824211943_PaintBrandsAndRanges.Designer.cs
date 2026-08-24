@@ -3,6 +3,7 @@ using System;
 using MeshVault.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace MeshVault.Data.Migrations
 {
     [DbContext(typeof(MeshVaultDbContext))]
-    partial class MeshVaultDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260824211943_PaintBrandsAndRanges")]
+    partial class PaintBrandsAndRanges
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.11");

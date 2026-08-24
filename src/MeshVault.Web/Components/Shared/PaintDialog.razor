@@ -12,9 +12,10 @@
                           Error="@string.IsNullOrWhiteSpace(Name)" ErrorText="A name is required"
                           Placeholder="Mephiston Red" />
 
-            @* Both suggest rather than restrict. Ranges are renamed and
-               reissued constantly, and somebody always owns a brand no list
-               has heard of. *@
+            @* Brands come from the list an administrator curates in Settings,
+               and the ranges narrow to whichever brand is chosen. Both still
+               accept anything typed, so a one-off brand never blocks recording
+               a paint you actually own. *@
             <div class="d-flex gap-3">
                 <MudAutocomplete T="string" Value="Brand" ValueChanged="OnBrandChanged"
                                  SearchFunc="SearchBrands" Label="Brand" Variant="Variant.Outlined"
@@ -24,6 +25,7 @@
                 <MudAutocomplete T="string" @bind-Value="Range" SearchFunc="SearchRanges"
                                  Label="Range" Variant="Variant.Outlined" Margin="Margin.Dense"
                                  CoerceValue="true" Clearable="true" Placeholder="Base"
+                                 Disabled="@string.IsNullOrWhiteSpace(Brand)"
                                  HelperText="@RangeHelp" />
             </div>
 
@@ -91,29 +93,37 @@
     private string SwatchStyle =>
         string.IsNullOrWhiteSpace(Hex) ? "background:transparent" : $"background:{Hex}";
 
-    private string RangeHelp =>
-        PaintBrands.Known.ContainsKey(Brand?.Trim() ?? "")
-            ? $"Ranges {Brand!.Trim()} makes."
-            : "The line within the brand, such as Base or Speedpaint.";
+    /// <summary>Ranges of the currently chosen brand, reloaded when it changes.</summary>
+    private List<string> _ranges = [];
 
-    private Task<IEnumerable<string>> SearchBrands(string value, CancellationToken ct) =>
-        Task.FromResult(PaintBrands.Brands.Where(b =>
-            string.IsNullOrWhiteSpace(value) || b.Contains(value, StringComparison.OrdinalIgnoreCase)));
+    protected override async Task OnInitializedAsync() => await LoadRanges();
+
+    private string RangeHelp => string.IsNullOrWhiteSpace(Brand)
+        ? "Choose a brand first."
+        : _ranges.Count > 0
+            ? $"Ranges {Brand.Trim()} makes."
+            : $"No ranges recorded for {Brand.Trim()} yet. An administrator adds them in Settings.";
+
+    private async Task<IEnumerable<string>> SearchBrands(string value, CancellationToken ct) =>
+        await Paints.SuggestBrandsAsync(value ?? "", 20, ct);
 
     /// <summary>Narrowed to the chosen brand, because "Base" means Citadel's.</summary>
     private Task<IEnumerable<string>> SearchRanges(string value, CancellationToken ct) =>
-        Task.FromResult(PaintBrands.RangesFor(Brand).Where(r =>
+        Task.FromResult(_ranges.Where(r =>
             string.IsNullOrWhiteSpace(value) || r.Contains(value, StringComparison.OrdinalIgnoreCase)));
 
-    private void OnBrandChanged(string? brand)
+    private async Task LoadRanges() => _ranges = await Paints.RangesForAsync(Brand);
+
+    private async Task OnBrandChanged(string? brand)
     {
         var previous = Brand;
         Brand = brand ?? "";
+        await LoadRanges();
 
         // Changing brand invalidates a range picked from the old one: Citadel's
         // "Base" is not Vallejo's anything.
         if (!string.Equals(previous, Brand, StringComparison.OrdinalIgnoreCase)
-            && !PaintBrands.RangesFor(Brand).Contains(Range, StringComparer.OrdinalIgnoreCase))
+            && !_ranges.Contains(Range, StringComparer.OrdinalIgnoreCase))
         {
             Range = "";
         }

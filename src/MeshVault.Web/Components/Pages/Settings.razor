@@ -42,6 +42,18 @@
             </MudText>
         </MudPaper>
     </MudItem>
+    @if (_paints)
+    {
+        <MudItem xs="12" sm="4">
+            <MudPaper Outlined="true" Class="pa-4 settings-card" @onclick="@(() => Go("/settings/paints"))">
+                <MudIcon Icon="@Icons.Material.Filled.Palette" Color="Color.Primary" />
+                <MudText Typo="Typo.body1" Style="font-weight:600">Paint brands</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    The makes and ranges offered when anyone adds a paint.
+                </MudText>
+            </MudPaper>
+        </MudItem>
+    }
 </MudGrid>
 
 <MudPaper Outlined="true" Class="pa-5" Style="max-width:720px">

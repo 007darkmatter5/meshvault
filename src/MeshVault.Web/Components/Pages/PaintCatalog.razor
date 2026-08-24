@@ -1,0 +1,144 @@
+@page "/settings/paints"
+@attribute [Authorize(Policy = Policies.Admin)]
+@rendermode InteractiveServer
+@inject PaintStore Paints
+@inject SettingsStore Store
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Paint brands - MeshVault</PageTitle>
+
+<SettingsNav />
+
+<MudText Typo="Typo.h5" Class="mb-1">Paint brands and ranges</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
+    The makes and lines offered when anyone adds a paint. Nothing is here to begin with &mdash;
+    add the ones this instance actually uses. A range belongs to one brand, so choosing Citadel
+    offers Citadel's ranges and nobody else's.
+</MudText>
+
+@if (!_enabled)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Painting is turned off, so nobody can see this list yet. Turn it on under
+        <MudLink Href="/settings">General</MudLink>.
+    </MudAlert>
+}
+
+<MudPaper Outlined="true" Class="pa-5" Style="max-width:840px">
+    <div class="d-flex align-center justify-space-between mb-4">
+        <MudText Typo="Typo.h6">Brands</MudText>
+        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add" OnClick="AddBrand">Add a brand</MudButton>
+    </div>
+
+    @if (_brands.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            No brands yet. Add one and its ranges, and they will appear as suggestions on the
+            paint rack.
+        </MudText>
+    }
+    else
+    {
+        @foreach (var brand in _brands)
+        {
+            <div class="brand-row">
+                <div class="d-flex align-center gap-2">
+                    <MudText Typo="Typo.body1" Style="font-weight:600">@brand.Name</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        @brand.Ranges.Count range@(brand.Ranges.Count == 1 ? "" : "s")
+                    </MudText>
+                    <MudSpacer />
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                   OnClick="@(() => RenameBrand(brand))" title="Rename brand" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => DeleteBrand(brand))" title="Remove brand" />
+                </div>
+
+                <div class="d-flex flex-wrap align-center gap-1 mt-2">
+                    @foreach (var range in brand.Ranges)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0"
+                                 OnClose="@(() => DeleteRange(range))">
+                            @range.Name
+                        </MudChip>
+                    }
+                    <MudButton Size="Size.Small" Variant="Variant.Text"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="@(() => AddRange(brand))">Range</MudButton>
+                </div>
+            </div>
+        }
+    }
+</MudPaper>
+
+@code {
+    private List<PaintBrand> _brands = [];
+    private bool _enabled;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _enabled = await Store.GetBoolAsync(SettingKeys.PaintsEnabled);
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _brands = await Paints.GetBrandsAsync();
+
+    private async Task<string?> Ask(string title, string label, string initial = "")
+    {
+        var parameters = new DialogParameters<TextPromptDialog>
+        {
+            { x => x.Label, label },
+            { x => x.Value, initial },
+        };
+
+        var dialog = await Dialogs.ShowAsync<TextPromptDialog>(title, parameters);
+        return (await dialog.Result) is { Canceled: false, Data: string text } ? text : null;
+    }
+
+    private async Task AddBrand()
+    {
+        if (await Ask("Add a brand", "Brand name") is not { } name) return;
+
+        await Paints.AddBrandAsync(name);
+        await LoadAsync();
+    }
+
+    private async Task RenameBrand(PaintBrand brand)
+    {
+        if (await Ask("Rename brand", "Brand name", brand.Name) is not { } name) return;
+
+        await Paints.RenameBrandAsync(brand.Id, name);
+        await LoadAsync();
+    }
+
+    private async Task DeleteBrand(PaintBrand brand)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync(
+            "Remove brand?",
+            $"{brand.Name} and its {brand.Ranges.Count} range(s) stop being suggested. Paints "
+            + "already recorded against it keep the text they were given.",
+            yesText: "Remove", noText: null, cancelText: "Cancel");
+
+        if (confirmed != true) return;
+
+        await Paints.DeleteBrandAsync(brand.Id);
+        await LoadAsync();
+        Snackbar.Add($"Removed {brand.Name}", Severity.Info);
+    }
+
+    private async Task AddRange(PaintBrand brand)
+    {
+        if (await Ask($"Add a range to {brand.Name}", "Range name") is not { } name) return;
+
+        await Paints.AddRangeAsync(brand.Id, name);
+        await LoadAsync();
+    }
+
+    private async Task DeleteRange(PaintRange range)
+    {
+        await Paints.DeleteRangeAsync(range.Id);
+        await LoadAsync();
+    }
+}

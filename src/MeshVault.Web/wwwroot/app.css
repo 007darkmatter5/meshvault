@@ -459,3 +459,6 @@ html, body {
 }
 /* Owning none of something still on the rack is worth noticing. */
 .paint-quantity-none { color: var(--mud-palette-text-secondary); opacity: .6; }
+
+.brand-row { padding: 12px 0; }
+.brand-row + .brand-row { border-top: 1px solid var(--mud-palette-lines-default); }
