@@ -19,9 +19,16 @@ public static class FileKinds
     public static FileKind FromExtension(string extension) =>
         Map.TryGetValue(extension, out var kind) ? kind : FileKind.Other;
 
-    /// <summary>Extensions we can currently rasterise a thumbnail for.</summary>
+    /// <summary>
+    /// Extensions a thumbnail can actually be rasterised from.
+    /// </summary>
+    /// <remarks>
+    /// Must agree with what MeshLoader can open. This listed .obj while the
+    /// reader could not open one, so every OBJ was queued, read off the library
+    /// share, thrown at a reader that refused it, and counted as a failed
+    /// preview. MeshLoaderAgreementTests pins the two together.
+    /// </remarks>
     public static bool CanThumbnail(string extension) =>
         extension.Equals(".stl", StringComparison.OrdinalIgnoreCase)
-        || extension.Equals(".3mf", StringComparison.OrdinalIgnoreCase)
-        || extension.Equals(".obj", StringComparison.OrdinalIgnoreCase);
+        || extension.Equals(".3mf", StringComparison.OrdinalIgnoreCase);
 }
