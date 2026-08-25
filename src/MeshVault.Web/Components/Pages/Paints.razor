@@ -148,18 +148,23 @@ else
                     </MudTd>
                     <MudTd DataLabel="Stock">
                         @* One click rather than a dialog: this is the edit made
-                           constantly, usually while standing at the shelf. *@
-                        <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
+                           constantly, usually while standing at the shelf.
+
+                           A toggle group rather than buttons, because which one
+                           is current has to be obvious at a glance. MudButtonGroup
+                           sets the variant and colour of every button in it, so
+                           the per-button "this one is selected" styling was
+                           overridden and all four looked identical. *@
+                        <MudToggleGroup T="PaintStock" Value="context.Stock"
+                                        ValueChanged="@((PaintStock v) => SetStock(context, v))"
+                                        SelectionMode="SelectionMode.SingleSelection"
+                                        Color="@StockColor(context.Stock)"
+                                        Size="Size.Small" CheckMark="true" Outlined="true">
                             @foreach (var stock in Enum.GetValues<PaintStock>())
                             {
-                                var value = stock;
-                                <MudButton Color="@(context.Stock == value ? StockColor(value) : Color.Default)"
-                                           Variant="@(context.Stock == value ? Variant.Filled : Variant.Outlined)"
-                                           OnClick="@(() => SetStock(context, value))">
-                                    @Label(value)
-                                </MudButton>
+                                <MudToggleItem T="PaintStock" Value="@stock" Text="@Label(stock)" />
                             }
-                        </MudButtonGroup>
+                        </MudToggleGroup>
                     </MudTd>
                     <MudTd Style="text-align:right">
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
