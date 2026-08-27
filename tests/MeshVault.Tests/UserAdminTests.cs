@@ -121,26 +121,83 @@ public class UserAdminTests : IDisposable
     public async Task A_created_account_gets_the_role_it_was_given()
     {
         await SeedOwnerAsync();
-        await Admin.CreateAsync("second", null, null, "a-long-passphrase", Roles.Admin);
+        await Admin.CreateAsync("second", null, null, "a-long-passphrase", Roles.Member);
 
         var user = await Users.FindByNameAsync("second");
-        Assert.Contains(Roles.Admin, await Users.GetRolesAsync(user!));
+        Assert.Contains(Roles.Member, await Users.GetRolesAsync(user!));
+    }
+
+    [Fact]
+    public async Task A_second_administrator_cannot_be_created()
+    {
+        // One administrator, because {collection} is a folder token whose value
+        // is per-user: two of them would file the same library two different
+        // ways on disk.
+        await SeedOwnerAsync();
+
+        var result = await Admin.CreateAsync("second", null, null, "a-long-passphrase", Roles.Admin);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Errors, e => e.Code == "OneAdmin");
+        Assert.Equal(1, await Admin.CountAdminsAsync());
+
+        // Refused before the account is made, so there is no half-created row
+        // to tidy up afterwards.
+        Assert.Null(await Users.FindByNameAsync("second"));
     }
 
     // Roles -----------------------------------------------------------------
 
     [Fact]
-    public async Task A_member_can_be_promoted_and_demoted()
+    public async Task Promoting_a_member_hands_the_role_over_rather_than_adding_a_second()
     {
         var ownerId = await SeedOwnerAsync();
         var memberId = await AddMemberAsync();
 
         Assert.True((await Admin.SetRoleAsync(memberId, Roles.Admin)).Succeeded);
-        Assert.Equal(2, await Admin.CountAdminsAsync());
 
-        Assert.True((await Admin.SetRoleAsync(memberId, Roles.Member)).Succeeded);
         Assert.Equal(1, await Admin.CountAdminsAsync());
-        Assert.NotNull(ownerId);
+        Assert.Contains(Roles.Admin,
+            await Users.GetRolesAsync((await Users.FindByIdAsync(memberId))!));
+        Assert.Contains(Roles.Member,
+            await Users.GetRolesAsync((await Users.FindByIdAsync(ownerId))!));
+    }
+
+    /// <summary>
+    /// The pair of guards must not close on each other.
+    /// </summary>
+    /// <remarks>
+    /// Demoting the only administrator is refused, so if promoting a second
+    /// were refused too there would be no sequence of single steps that moves
+    /// the role at all -- the account holding it could never hand it on, and on
+    /// a self-hosted box that is unrecoverable without editing SQLite by hand.
+    /// </remarks>
+    [Fact]
+    public async Task The_role_can_always_be_handed_on()
+    {
+        var ownerId = await SeedOwnerAsync();
+        var memberId = await AddMemberAsync();
+
+        // The only move available, and it has to be enough.
+        Assert.False((await Admin.SetRoleAsync(ownerId, Roles.Member)).Succeeded);
+        Assert.True((await Admin.SetRoleAsync(memberId, Roles.Admin)).Succeeded);
+
+        Assert.Equal(1, await Admin.CountAdminsAsync());
+        Assert.Contains(Roles.Admin,
+            await Users.GetRolesAsync((await Users.FindByIdAsync(memberId))!));
+    }
+
+    [Fact]
+    public async Task There_is_never_a_moment_with_no_administrator()
+    {
+        var ownerId = await SeedOwnerAsync();
+        var memberId = await AddMemberAsync();
+
+        await Admin.SetRoleAsync(memberId, Roles.Admin);
+        Assert.Equal(1, await Admin.CountAdminsAsync());
+
+        await Admin.SetRoleAsync(ownerId, Roles.Admin);
+        Assert.Equal(1, await Admin.CountAdminsAsync());
     }
 
     /// <summary>The lockout guard: demoting the only admin must be refused.</summary>

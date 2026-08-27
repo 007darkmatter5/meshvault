@@ -93,6 +93,11 @@ public class UserAdmin(
             CreatedUtc = DateTimeOffset.UtcNow,
         };
 
+        // Asked for before the account is made, so a refusal leaves nothing
+        // half-created to clean up.
+        if (role == Roles.Admin && await CountAdminsAsync(ct) > 0)
+            return Fail("OneAdmin", OneAdminReason);
+
         var result = await users.CreateAsync(user, password);
         if (!result.Succeeded) return result;
 
@@ -100,6 +105,23 @@ public class UserAdmin(
         log.LogInformation("Created account {User} as {Role}", user.UserName, role);
         return result;
     }
+
+    /// <summary>
+    /// Why a second administrator is refused.
+    /// </summary>
+    /// <remarks>
+    /// One administrator, and everyone else reads. The reason is not really
+    /// about accounts: <c>{collection}</c> is a folder token whose value is
+    /// per-user, so the folder tree Organize produces depends on who is signed
+    /// in when it runs. Two administrators would file the same library two
+    /// different ways on disk. Until a collection is a property of the model
+    /// rather than of the viewer, one administrator is what keeps the layout
+    /// single-valued.
+    /// </remarks>
+    public const string OneAdminReason =
+        "MeshVault has one owner. Everyone else reads the library, keeping their "
+        + "own collections and favourites. Add this account as a viewer, then set its role "
+        + "to owner from the list to hand ownership over.";
 
     /// <summary>Moves an account between roles, refusing to remove the last administrator.</summary>
     public async Task<IdentityResult> SetRoleAsync(string userId, string role, CancellationToken ct = default)
@@ -116,7 +138,25 @@ public class UserAdmin(
         if (current.Contains(Roles.Admin) && role != Roles.Admin && await CountAdminsAsync(ct) <= 1)
         {
             return Fail("LastAdmin",
-                "This is the only administrator. Promote someone else before changing this account.");
+                "This account owns this MeshVault. Make someone else the owner instead — that hands it over in one step.");
+        }
+
+        // Promoting somebody hands the role over rather than adding a second.
+        //
+        // Refusing it instead would lock the pair: demoting the only
+        // administrator is refused just above, so with no transfer there is no
+        // sequence of single steps that moves the role at all. Doing it here
+        // keeps the count at exactly one through every state, with no moment
+        // where the library has none.
+        if (role == Roles.Admin && !current.Contains(Roles.Admin))
+        {
+            foreach (var previous in await users.GetUsersInRoleAsync(Roles.Admin))
+            {
+                await users.RemoveFromRolesAsync(previous, await users.GetRolesAsync(previous));
+                await users.AddToRoleAsync(previous, Roles.Member);
+                log.LogInformation(
+                    "Administrator handed from {From} to {To}", previous.UserName, user.UserName);
+            }
         }
 
         await users.RemoveFromRolesAsync(user, current);

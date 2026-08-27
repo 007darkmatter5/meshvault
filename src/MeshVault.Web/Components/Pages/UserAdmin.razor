@@ -14,18 +14,19 @@
 <div class="d-flex align-center justify-space-between mb-1">
     <MudText Typo="Typo.h5">Accounts</MudText>
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd"
-               OnClick="CreateUser">New account</MudButton>
+               OnClick="CreateUser">New viewer</MudButton>
 </div>
 <MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
-    Everyone who can sign in. Administrators manage libraries and accounts; members browse and keep
-    their own collections and favorites.
+    One person owns this MeshVault and manages its libraries, scans and accounts. Anyone else you
+    add can browse the catalog and keep their own collections and favorites, and changes nothing
+    about the files on disk.
 </MudText>
 
 <MudPaper Outlined="true" Class="pa-4 mb-6">
     <MudSwitch T="bool" Value="_registrationOpen" ValueChanged="SetRegistrationOpen" Color="Color.Warning"
-               Label="Let anyone who can reach this site create their own account" />
+               Label="Let anyone who can reach this site create their own viewer account" />
     <MudText Typo="Typo.caption" Class="mud-text-secondary">
-        Usually better to leave this off and add accounts here instead.
+        Usually better to leave this off and add viewers here instead.
     </MudText>
 </MudPaper>
 
@@ -64,10 +65,15 @@
             <MudTd DataLabel="Role">
                 <MudSelect T="string" Value="@context.Role" Dense="true" Margin="Margin.Dense"
                            Variant="Variant.Outlined" Style="max-width:140px"
-                           ValueChanged="@(role => ChangeRole(context, role))">
+                           ValueChanged="@(role => ChangeRole(context, role))"
+                           ToStringFunc="Roles.Label">
+                    @* Still the stored role underneath; only the wording is
+                       owner-and-viewer. Setting this one to owner hands the
+                       role over, which is why it stays a picker rather than
+                       becoming a label. *@
                     @foreach (var role in Roles.All)
                     {
-                        <MudSelectItem T="string" Value="@role">@role</MudSelectItem>
+                        <MudSelectItem T="string" Value="@role">@Roles.Label(role)</MudSelectItem>
                     }
                 </MudSelect>
             </MudTd>
@@ -131,17 +137,35 @@
 
     private async Task CreateUser()
     {
-        var dialog = await Dialogs.ShowAsync<UserDialog>("New account");
+        var dialog = await Dialogs.ShowAsync<UserDialog>("New viewer");
         if ((await dialog.Result) is { Canceled: false })
         {
             await LoadAsync();
-            Snackbar.Add("Account created", Severity.Success);
+            Snackbar.Add("Viewer added", Severity.Success);
         }
     }
 
     private async Task ChangeRole(UserSummary user, string role)
     {
         if (role == user.Role) return;
+
+        // Promoting hands the role over, so it changes somebody else's account
+        // as well. That is not something to discover from the list redrawing.
+        if (role == Roles.Admin && _users.FirstOrDefault(u => u.Role == Roles.Admin) is { } holder)
+        {
+            var handOver = await Dialogs.ShowMessageBoxAsync(
+                "Hand over ownership?",
+                $"MeshVault has one owner. {holder.UserName} becomes a viewer, and "
+                + $"{user.UserName} takes over managing libraries, scans and accounts.",
+                yesText: "Hand it over", noText: null, cancelText: "Cancel");
+
+            if (handOver != true)
+            {
+                // Put the dropdown back where it was.
+                await LoadAsync();
+                return;
+            }
+        }
 
         var result = await Admin.SetRoleAsync(user.Id, role);
         if (!result.Succeeded)
@@ -153,7 +177,7 @@
         }
 
         await LoadAsync();
-        Snackbar.Add($"{user.UserName} is now a {role}", Severity.Success);
+        Snackbar.Add($"{user.UserName} is now the {Roles.Label(role).ToLowerInvariant()}", Severity.Success);
     }
 
     private async Task ResetPassword(UserSummary user)

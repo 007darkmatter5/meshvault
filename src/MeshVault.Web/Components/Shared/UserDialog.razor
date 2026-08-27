@@ -17,17 +17,34 @@
             <MudTextField @bind-Value="_email" Label="Email (optional)" Variant="Variant.Outlined"
                           Margin="Margin.Dense" />
 
-            <MudSelect @bind-Value="_role" Label="Role" Variant="Variant.Outlined" Margin="Margin.Dense">
-                @foreach (var role in Roles.All)
-                {
-                    <MudSelectItem T="string" Value="@role">@role</MudSelectItem>
-                }
-            </MudSelect>
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                @(_role == Roles.Admin
-                    ? "Administrators manage libraries, previews and accounts."
-                    : "Members browse the catalog and keep their own collections and favorites.")
-            </MudText>
+            @* A role that cannot be granted is not offered. The service refuses
+               it either way, but a picker that lets you choose something and
+               then fails on save is a worse way to learn the rule. *@
+            @if (_adminTaken)
+            {
+                <MudTextField Value="@Roles.Label(Roles.Member)" Label="Role" ReadOnly="true"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    They can browse the catalog and keep their own collections and favorites.
+                    Nothing they do changes the files on disk. To hand ownership over instead,
+                    add them here and then set their role to owner from the list.
+                </MudText>
+            }
+            else
+            {
+                <MudSelect @bind-Value="_role" Label="Role" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" ToStringFunc="Roles.Label">
+                    @foreach (var role in Roles.All)
+                    {
+                        <MudSelectItem T="string" Value="@role">@Roles.Label(role)</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    @(_role == Roles.Admin
+                        ? "The owner manages libraries, previews and accounts."
+                        : "Viewers browse the catalog and keep their own collections and favorites.")
+                </MudText>
+            }
 
             <MudTextField @bind-Value="_password" Label="Password" InputType="InputType.Password"
                           Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
@@ -62,6 +79,12 @@
     private string _role = Roles.Member;
     private string _password = "";
     private readonly List<string> _errors = [];
+
+    /// <summary>Whether the one administrator this MeshVault allows already exists.</summary>
+    private bool _adminTaken;
+
+    protected override async Task OnInitializedAsync() =>
+        _adminTaken = await Admin.CountAdminsAsync() > 0;
 
     private bool CanSave => !string.IsNullOrWhiteSpace(_userName) && _password.Length >= 10;
 
