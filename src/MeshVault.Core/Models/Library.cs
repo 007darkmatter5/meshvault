@@ -1,3 +1,5 @@
+using MeshVault.Core.Services;
+
 namespace MeshVault.Core.Models;
 
 /// <summary>A root folder on disk that MeshVault scans for models.</summary>
@@ -38,6 +40,17 @@ public class Library
 
     /// <summary>Whether organising this library also renames the files inside.</summary>
     public bool RenameFiles { get; set; }
+
+    /// <summary>Casing convention for folder names.</summary>
+    /// <remarks>
+    /// Stored rather than defaulted so an existing library keeps rendering the
+    /// way it always has: <see cref="NameCase.AsWritten"/> is zero, which is what
+    /// a column added to existing rows already holds.
+    /// </remarks>
+    public NameCase FolderCase { get; set; }
+
+    /// <summary>Casing convention for file names, used only when renaming is on.</summary>
+    public NameCase FileCase { get; set; }
 
     public DateTimeOffset? LastScannedUtc { get; set; }
 

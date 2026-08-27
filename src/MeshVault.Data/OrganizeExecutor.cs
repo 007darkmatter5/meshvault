@@ -69,7 +69,7 @@ public class OrganizeExecutor(
         // ModelEntry will stand for. A pack splitting into ninety-eight and four
         // folders merging into one are the same shape seen from here.
         var byDestination = plan.Moves
-            .Where(m => m.Outcome == MoveOutcome.Move && m.To.Length > 0)
+            .Where(Actionable)
             .GroupBy(m => m.To, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -81,7 +81,7 @@ public class OrganizeExecutor(
         // folder holding two hundred take wildly different times, so a bar that
         // steps per folder sits still and then jumps, which reads as finished.
         var total = plan.Moves
-            .Where(m => m.Outcome == MoveOutcome.Move)
+            .Where(Actionable)
             .Sum(m => m.FileIds.Count > 0 ? m.FileIds.Count : 1);
         var done = 0;
 
@@ -225,13 +225,22 @@ public class OrganizeExecutor(
 
                 try
                 {
-                    if (!string.Equals(from, to, StringComparison.OrdinalIgnoreCase))
-                        File.Move(from, to);
+                    // Ordinal, not OrdinalIgnoreCase. "Wall.stl" to "wall.stl"
+                    // is a real rename and the whole point of asking for
+                    // kebab-case; skipping it would leave the database saying
+                    // one name and the disk another, which a case-sensitive
+                    // share reads as a missing file.
+                    var unchanged = string.Equals(from, to, StringComparison.Ordinal);
+                    if (!unchanged) File.Move(from, to);
 
                     file.RelativePath = $"{group.Key}/{name}";
                     file.FileName = name;
                     file.ModelEntryId = owner.Model.Id;
-                    moved++;
+
+                    // Only what actually happened. A model already in place with
+                    // two of its six files renamed did two things, and reporting
+                    // six would be counting the four that were left alone.
+                    if (!unchanged) moved++;
                 }
                 catch (Exception ex)
                 {
@@ -272,6 +281,25 @@ public class OrganizeExecutor(
 
         return new OrganizeResult(moved, created, deleted, added, removed, problems);
     }
+
+    /// <summary>
+    /// Rows this run has work to do for.
+    /// </summary>
+    /// <remarks>
+    /// A model already in the right folder is still work when the rules would
+    /// rename the files inside it. Leaving it out is how the plan came to
+    /// promise "6 renamed" beside "already there" and then do nothing at all —
+    /// the one thing this page must never do, because the plan is the only
+    /// account anybody gets of what is about to happen.
+    ///
+    /// The two cases are the same operation seen from different distances: put
+    /// these files under this folder with these names. That the folder happens
+    /// to be the one they are already in changes nothing below.
+    /// </remarks>
+    private static bool Actionable(PlannedMove move) =>
+        move.To.Length > 0
+        && (move.Outcome == MoveOutcome.Move
+            || (move.Outcome == MoveOutcome.AlreadyThere && move.Renames.Count > 0));
 
     private record Owner(ModelEntry Model, bool IsNew);
 

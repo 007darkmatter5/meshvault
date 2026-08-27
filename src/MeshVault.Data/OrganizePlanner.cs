@@ -22,6 +22,17 @@ public record OrganizeRules
     /// record that a mesh was pre-supported or was version two.
     /// </summary>
     public bool RenameFiles { get; init; }
+
+    /// <summary>Casing convention for each folder segment.</summary>
+    public NameCase FolderCase { get; init; }
+
+    /// <summary>
+    /// Casing convention for each file name. Kept apart from
+    /// <see cref="FolderCase"/> because the two are genuinely different tastes:
+    /// folders get read by a person browsing a share, file names get typed at a
+    /// slicer.
+    /// </summary>
+    public NameCase FileCase { get; init; }
 }
 
 public enum MoveOutcome
@@ -153,6 +164,24 @@ public record OrganizePlan(IReadOnlyList<PlannedMove> Moves)
 
     /// <summary>Every model this plan has something to say about.</summary>
     public IReadOnlyList<int> ModelIds => [.. Moves.Select(m => m.ModelId).Distinct()];
+
+    /// <summary>
+    /// Models this plan would actually do something to.
+    /// </summary>
+    /// <remarks>
+    /// Renames count. A model already in the right folder whose files are being
+    /// renamed is doing work, and leaving it out of this would hide it from the
+    /// checkboxes — offering no way to choose the very rows whose only change is
+    /// the one the file template asked for.
+    /// </remarks>
+    public IReadOnlyList<int> ActionableModelIds =>
+    [
+        .. Moves
+            .Where(m => m.Outcome == MoveOutcome.Move
+                || (m.Outcome == MoveOutcome.AlreadyThere && m.Renames.Count > 0))
+            .Select(m => m.ModelId)
+            .Distinct(),
+    ];
 
     /// <summary>
     /// The same plan narrowed to a chosen set of models.
@@ -338,7 +367,7 @@ public class OrganizePlanner(
     ];
 
     private static string Destination(ModelEntry model, OrganizeRules rules) =>
-        PathTemplate.Render(rules.FolderTemplate, TokensFor(model), forFile: false);
+        PathTemplate.Render(rules.FolderTemplate, TokensFor(model), forFile: false, rules.FolderCase);
 
     private static List<PlannedRename> PlanRenames(
         ModelEntry model, OrganizeRules rules, IEnumerable<ModelFile>? only = null)
@@ -349,15 +378,43 @@ public class OrganizePlanner(
         var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var index = 0;
 
+        // What the mesh of each name is. A companion carries no variant or
+        // sculpt of its own, because VariantClassifier only reads meshes — a
+        // readme is not a variant of anything, and keying one would scatter it
+        // through the sculpt list.
+        //
+        // "UD-001-HOL-Wall.lys" plainly belongs to "UD-001-HOL-Wall.stl", and
+        // letting {variant} fall back for it renders the Lychee project of a
+        // hollowed mesh as "plain" — a name that states the opposite of what
+        // the file it was sitting next to says. The planner already takes this
+        // view when it files companions; the rename token should agree.
+        var siblings = model.Files
+            .Where(f => f.Kind is FileKind.Mesh or FileKind.Cad)
+            .GroupBy(f => Path.GetFileNameWithoutExtension(f.FileName),
+                StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
         foreach (var file in (only ?? model.Files).OrderBy(f => f.RelativePath))
         {
             index++;
+            var bare = Path.GetFileNameWithoutExtension(file.FileName);
+            var sibling = siblings.GetValueOrDefault(bare);
+
             var tokens = TokensFor(model);
-            tokens["file"] = Path.GetFileNameWithoutExtension(file.FileName);
+            tokens["file"] = bare;
             tokens["index"] = index.ToString();
             tokens["kind"] = file.Kind.ToString();
 
-            var stem = PathTemplate.Render(rules.FileTemplate, tokens, forFile: true);
+            // Both are properties of the file, not of the model, and both were
+            // offered in the token list while rendering nothing but their own
+            // fallback -- every file in the library came out "Unsorted" and
+            // "Plain". {variant} matters most of the three: it is the only
+            // token that can carry "this one is hollowed" through a rename that
+            // throws the original name away.
+            tokens["sculpt"] = file.SculptName ?? sibling?.SculptName;
+            tokens["variant"] = file.VariantLabel ?? sibling?.VariantLabel;
+
+            var stem = PathTemplate.Render(rules.FileTemplate, tokens, forFile: true, rules.FileCase);
             if (string.IsNullOrEmpty(stem)) continue;
 
             // The extension is never templated. It is what tells every other
@@ -366,11 +423,20 @@ public class OrganizePlanner(
 
             // Two files rendering to the same name would have one overwrite the
             // other, so the later ones are numbered instead.
+            // The number has to obey the convention as well. "spring-dragon (2)"
+            // is not kebab-case, and a rule that held for every name but the
+            // duplicates would be worse than no rule. Re-casing "<stem> <n>"
+            // gets there for free: kebab joins it with a dash, Pascal closes it
+            // up, and only "leave as written" keeps the brackets.
             var candidate = name;
             var suffix = 2;
             while (!used.Add(candidate))
             {
-                candidate = $"{stem} ({suffix}){file.Extension}";
+                var numbered = rules.FileCase == NameCase.AsWritten
+                    ? $"{stem} ({suffix})"
+                    : NameCasing.Apply($"{stem} {suffix}", rules.FileCase);
+
+                candidate = numbered + file.Extension;
                 suffix++;
             }
 
@@ -463,7 +529,7 @@ public class OrganizePlanner(
 
             var tokens = TokensFor(owner);
             tokens["sculpt"] = name;
-            var destination = PathTemplate.Render(rules.FolderTemplate, tokens, forFile: false);
+            var destination = PathTemplate.Render(rules.FolderTemplate, tokens, forFile: false, rules.FolderCase);
 
             if (string.IsNullOrEmpty(destination))
             {

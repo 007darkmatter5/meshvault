@@ -478,6 +478,78 @@ public class OrganizeExecutorTests : IDisposable
         Assert.True(Exists("inbox/wall/Wall.stl"));
     }
 
+    [Fact]
+    public async Task Renames_happen_even_when_the_folder_is_already_right()
+    {
+        // The plan showed "6 renamed" beside "already there" and then did
+        // nothing, because the executor only walked rows whose outcome was
+        // Move. A plan that promises and does not deliver is the one failure
+        // this page cannot have.
+        await NewModel("Dungeon Blocks/Wall", "Wall.stl");
+
+        var plan = await _planner.PlanAsync(1, new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{sculpt}",
+            RenameFiles = true,
+            FileTemplate = "{model} - {file}",
+        });
+
+        Assert.NotEmpty(plan.Moves.SelectMany(m => m.Renames));
+
+        var result = await _executor.ApplyAsync(1, plan);
+
+        Assert.True(result.Clean, string.Join("; ", result.Problems));
+        Assert.True(Exists("Dungeon Blocks/Wall/Wall - Wall.stl"));
+        Assert.False(Exists("Dungeon Blocks/Wall/Wall.stl"));
+    }
+
+    [Fact]
+    public async Task A_case_only_rename_reaches_the_disk_and_not_just_the_database()
+    {
+        // Skipping this one on OrdinalIgnoreCase left the database saying
+        // "wall.stl" while the disk still held "Wall.stl" — invisible on this
+        // Windows box and a missing file on the Linux share it ships to.
+        await NewModel("Dungeon Blocks/Wall", "Wall.stl");
+
+        var plan = await _planner.PlanAsync(1, new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{sculpt}",
+            RenameFiles = true,
+            FileTemplate = "{file}",
+            FileCase = NameCase.Kebab,
+        });
+
+        await _executor.ApplyAsync(1, plan);
+
+        var onDisk = Path.GetFileName(
+            Directory.GetFiles(Path.Combine(_root, "Dungeon Blocks", "Wall"))[0]);
+
+        await using var db = _factory.CreateDbContext();
+        var recorded = (await db.Files.SingleAsync()).FileName;
+
+        Assert.Equal("wall.stl", onDisk);
+        Assert.Equal(onDisk, recorded);
+    }
+
+    [Fact]
+    public async Task A_file_already_correctly_named_is_not_counted_as_moved()
+    {
+        // Two of six renamed is two things done, not six.
+        await NewModel("Dungeon Blocks/Wall", "Wall.stl", "Wall_supported.stl");
+
+        var plan = await _planner.PlanAsync(1, new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{sculpt}",
+            RenameFiles = true,
+            FileTemplate = "{file}",
+        });
+
+        var result = await _executor.ApplyAsync(1, plan);
+
+        Assert.Equal(0, result.FilesMoved);
+        Assert.True(result.Clean, string.Join("; ", result.Problems));
+    }
+
     public void Dispose()
     {
         _conn.Dispose();

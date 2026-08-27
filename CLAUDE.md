@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 dotnet build                                  # whole solution
-dotnet test                                   # all 443 tests, ~6s
+dotnet test                                   # all 483 tests, ~6s
 dotnet run --project src/MeshVault.Web        # http://localhost:5082 in Development
 
 # One class, or one test
@@ -149,6 +149,22 @@ Rules the executor will not bend:
 - Every file must end up inside its model's folder. A file blocked by a clash while its model moved
   gets a row of its own at the folder it is actually in (`RehomeStrandedAsync`).
 
+`NameCase` (kebab, snake, camel, Pascal, or `AsWritten`) is applied by `PathTemplate.Render` **per
+segment and before `Sanitize`** — per segment because `NameCasing` treats every non-alphanumeric
+character as a word break and would otherwise eat the slashes, and before sanitising so the last
+word on length, trailing dots and reserved device names stays with `Sanitize`. Run it after and
+`_CON` turns back into `con`. Folder and file casing are stored separately on `Library`;
+`AsWritten` is zero, so every library predating the feature renders exactly as it always did.
+`NameCasing.Words` deliberately does not split a letter from a digit — `Cinderwing3D` is one word —
+and keeps the tail of each word for Pascal/camel, or `SUP` becomes `Sup`.
+
+A row whose folder is **already right** can still be work: renaming applies to it. `AlreadyThere`
+carrying renames is actionable in both `OrganizeExecutor.Actionable` and
+`OrganizePlan.ActionableModelIds` — leaving it out of the first made the plan promise "6 renamed"
+and do nothing, and out of the second hid those rows from the checkboxes. The per-file move guard
+is `Ordinal`, not `OrdinalIgnoreCase`: `Wall.stl` → `wall.stl` is a real rename, and skipping it
+leaves the database saying one name and a case-sensitive share holding another.
+
 The page can run against a subset. Ticks are per model, and `OrganizePlan.For` narrows the plan
 before it is handed over — narrowing only ever drops rows, so what runs is a subset of what was on
 screen rather than a second plan. `VacancyNeeded` warns about the one case narrowing breaks: the
@@ -208,6 +224,17 @@ First registration becomes Admin and closes registration (`SettingKeys.Registrat
 account — on a self-hosted app that mistake means editing SQLite by hand. Deleting a user also
 removes their collections and favorites, which reference the owner by id rather than a foreign key
 and would otherwise linger unreachable.
+
+**There is exactly one Admin.** `CreateAsync` refuses a second; `SetRoleAsync` *hands the role
+over* — promoting anyone demotes the incumbent, atomically. Refusing the promotion instead would
+deadlock against the last-admin guard: with demotion of the only admin refused too, no sequence of
+single steps could move the role, and on a self-hosted box that is unrecoverable.
+`The_role_can_always_be_handed_on` pins this. The reason for the cap is not really accounts —
+`{collection}` is a folder token resolved per-user (`OrganizePlanner` filters
+`Collections.Where(c => c.OwnerId == userId)`), so **two admins would file the same library two
+different ways on disk**. Measured on the author's library: 2 models unfiled as the owner, 106 as a
+second account. If collections ever become a property of the model rather than the viewer, this cap
+is what can be lifted.
 
 Password rules are **length-only** (10 characters, no composition requirements). They are declared
 in `Program.cs`, `Register.razor`, `Account.razor` and each test harness — change all of them together.

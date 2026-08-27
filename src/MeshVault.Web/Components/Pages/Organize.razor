@@ -29,86 +29,229 @@ else
         <MudItem xs="12" md="5" lg="4">
             <MudPaper Outlined="true" Class="pa-5">
                 <MudStack Spacing="4">
-                    <MudTextField @bind-Value="_folderTemplate" Label="Folder for each model"
-                                  Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
-                                  DebounceInterval="400" OnDebounceIntervalElapsed="Replan"
-                                  Error="@(_folderProblems.Count > 0)"
-                                  ErrorText="@string.Join(", ", _folderProblems)"
-                                  HelperText="Slashes make folders. Relative to the library root." />
-
-                    <MudSwitch T="bool" Value="_renameFiles" ValueChanged="OnRenameToggled"
-                               Color="Color.Warning" Label="Also rename the files inside" />
-
-                    @if (_renameFiles)
-                    {
-                        <MudTextField @bind-Value="_fileTemplate" Label="Name for each file"
-                                      Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
-                                      DebounceInterval="400" OnDebounceIntervalElapsed="Replan"
-                                      Error="@(_fileProblems.Count > 0)"
-                                      ErrorText="@string.Join(", ", _fileProblems)"
-                                      HelperText="The extension is always kept." />
-
-                        <MudAlert Severity="Severity.Warning" Dense="true">
-                            Original file names often carry the only record that a mesh is
-                            pre-supported, or is version two. Keep <code>{file}</code> in the
-                            template and that survives.
-                        </MudAlert>
-                    }
-
-                    <div>
-                        <MudText Typo="Typo.overline" Class="mud-text-secondary">Tokens</MudText>
-                        <div class="organize-tokens mt-2">
-                            @foreach (var token in PathTemplate.ModelTokens)
-                            {
-                                <code>@("{" + token.Name + "}")</code>
-                                <span>@token.Description</span>
-                            }
-                            @if (_renameFiles)
-                            {
-                                @foreach (var token in PathTemplate.FileTokens)
-                                {
-                                    <code>@("{" + token.Name + "}")</code>
-                                    <span>@token.Description</span>
-                                }
-                            }
-                        </div>
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
-                            An empty value falls back to a placeholder such as "Unsorted", so nothing
-                            ends up loose at the root.
-                        </MudText>
-                    </div>
-
-                    @* Trying a template out costs nothing; keeping one is a
-                       button. Otherwise looking would overwrite. *@
-                    @if (ConventionChanged)
-                    {
-                        <div class="d-flex align-center gap-2 flex-wrap">
-                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
-                                       StartIcon="@Icons.Material.Filled.Save"
-                                       Disabled="@(!CanSaveConvention)" OnClick="SaveConvention">
-                                Save as default
-                            </MudButton>
-                            @if (_library?.FolderTemplate is not null)
-                            {
-                                <MudButton Size="Size.Small" Variant="Variant.Text"
-                                           OnClick="RevertConvention">Revert</MudButton>
-                            }
-                        </div>
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                            Just looking? Nothing is saved until you press it, and nothing is moved
-                            either way.
-                        </MudText>
-                    }
-                    else if (_library?.FolderTemplate is not null)
-                    {
-                        <div class="d-flex align-center gap-2">
-                            <MudIcon Icon="@Icons.Material.Filled.CloudDone" Size="Size.Small"
-                                     Color="Color.Success" />
-                            <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                This library's saved convention.
+                    @* Picking and authoring are two ways of answering the same
+                       question, not a thing and a detail of it. Whichever you
+                       are doing, the other is noise -- so only one is on
+                       screen. *@
+                    <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true"
+                             @bind-ActivePanelIndex="_tab" Class="organize-modes">
+                        <MudTabPanel Text="Presets" Icon="@Icons.Material.Filled.AutoAwesome">
+                            <MudText Typo="Typo.subtitle1" Class="mb-1 mt-3">
+                                How should this library be laid out?
                             </MudText>
-                        </div>
-                    }
+
+                            <MudRadioGroup T="string" Value="@_preset?.Name" ValueChanged="ApplyPreset">
+                                @foreach (var preset in OrganizePresets.All)
+                                {
+                                    <MudRadio T="string" Value="@preset.Name" Color="Color.Primary"
+                                              Dense="true" Class="organize-preset">
+                                        <div class="d-flex align-center gap-2 flex-wrap">
+                                            <MudText Typo="Typo.body2">@preset.Name</MudText>
+                                            @* Which one this library remembers,
+                                               said on the row it is true of.
+                                               A note at the foot of the list
+                                               could only ever be read as
+                                               belonging to the row above it. *@
+                                            @if (_savedPreset?.Name == preset.Name)
+                                            {
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Success"
+                                                         Variant="Variant.Text" Class="ma-0"
+                                                         Icon="@Icons.Material.Filled.CloudDone">
+                                                    saved
+                                                </MudChip>
+                                            }
+                                            @if (preset.Rules.RenameFiles)
+                                            {
+                                                @* The one destructive choice,
+                                                   said out loud where it is
+                                                   picked. *@
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Warning"
+                                                         Variant="Variant.Outlined" Class="ma-0">
+                                                    renames files
+                                                </MudChip>
+                                            }
+                                        </div>
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                                            @preset.Summary
+                                        </MudText>
+                                        <MudText Typo="Typo.caption" Class="organize-preset-example d-block">
+                                            @preset.Example
+                                        </MudText>
+                                    </MudRadio>
+                                }
+                            </MudRadioGroup>
+
+                            @* Reachable by coming back here from Custom, so it
+                               has to say why nothing is selected rather than
+                               look broken. *@
+                            @if (_preset is null)
+                            {
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+                                    <MudIcon Icon="@Icons.Material.Filled.Tune" Size="Size.Small"
+                                             Class="mr-1" Style="vertical-align:text-bottom" />
+                                    Your template is your own — none of these matches it. Picking one
+                                    would replace it.
+                                </MudText>
+                            }
+                        </MudTabPanel>
+
+                        <MudTabPanel Text="Custom" Icon="@Icons.Material.Filled.Tune">
+                            <MudStack Spacing="4" Class="pt-4">
+                                <MudTextField @bind-Value="_folderTemplate" Label="Folder for each model"
+                                              Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
+                                              DebounceInterval="400" OnDebounceIntervalElapsed="Replan"
+                                              Error="@(_folderProblems.Count > 0)"
+                                              ErrorText="@string.Join(", ", _folderProblems)"
+                                              HelperText="Slashes make folders. Relative to the library root." />
+
+                                <MudSelect T="NameCase" Value="_folderCase" ValueChanged="OnFolderCaseChanged"
+                                           Label="Folder naming" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                           ToStringFunc="NameCasing.Label"
+                                           HelperText="Applied to each folder in the path, separately.">
+                                    @foreach (var (choice, label, example) in NameCasing.Choices)
+                                    {
+                                        <MudSelectItem T="NameCase" Value="@choice">
+                                            @label
+                                            <MudText Typo="Typo.caption" Class="mud-text-secondary ml-2">
+                                                @example
+                                            </MudText>
+                                        </MudSelectItem>
+                                    }
+                                </MudSelect>
+
+                                <MudSwitch T="bool" Value="_renameFiles" ValueChanged="OnRenameToggled"
+                                           Color="Color.Warning" Label="Also rename the files inside" />
+
+                                @if (_renameFiles)
+                                {
+                                    <MudTextField @bind-Value="_fileTemplate" Label="Name for each file"
+                                                  Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
+                                                  DebounceInterval="400" OnDebounceIntervalElapsed="Replan"
+                                                  Error="@(_fileProblems.Count > 0)"
+                                                  ErrorText="@string.Join(", ", _fileProblems)"
+                                                  HelperText="The extension is always kept." />
+
+                                    <MudSelect T="NameCase" Value="_fileCase" ValueChanged="OnFileCaseChanged"
+                                               Label="File naming" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                               ToStringFunc="NameCasing.Label"
+                                               HelperText="The extension keeps its own case either way.">
+                                        @foreach (var (choice, label, example) in NameCasing.Choices)
+                                        {
+                                            <MudSelectItem T="NameCase" Value="@choice">
+                                                @label
+                                                <MudText Typo="Typo.caption" Class="mud-text-secondary ml-2">
+                                                    @example
+                                                </MudText>
+                                            </MudSelectItem>
+                                        }
+                                    </MudSelect>
+
+                                    <MudAlert Severity="Severity.Warning" Dense="true">
+                                        Original file names often carry the only record that a mesh is
+                                        pre-supported, or is version two. Keep <code>{file}</code> in the
+                                        template and that survives.
+                                    </MudAlert>
+                                }
+
+                                <div>
+                                    <MudText Typo="Typo.overline" Class="mud-text-secondary">Tokens</MudText>
+                                    <div class="organize-tokens mt-2">
+                                        @foreach (var token in PathTemplate.ModelTokens)
+                                        {
+                                            <code>@("{" + token.Name + "}")</code>
+                                            <span>@token.Description</span>
+                                        }
+                                        @if (_renameFiles)
+                                        {
+                                            @foreach (var token in PathTemplate.FileTokens)
+                                            {
+                                                <code>@("{" + token.Name + "}")</code>
+                                                <span>@token.Description</span>
+                                            }
+                                        }
+                                    </div>
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+                                        An empty value falls back to a placeholder such as "Unsorted", so nothing
+                                        ends up loose at the root.
+                                    </MudText>
+                                </div>
+                            </MudStack>
+                        </MudTabPanel>
+                    </MudTabs>
+
+                    @* Below a rule, because it is about the panel rather than
+                       about whichever row it happens to land under. Sitting
+                       flush at the end of a list of options, it read as a label
+                       on the last one. *@
+                    <MudDivider />
+
+                    @* Names the saved layout rather than only saying whether
+                       you match it. A row chip cannot answer this when what is
+                       saved is a template of somebody's own -- there is no row
+                       to put it on -- and "which scheme is this library
+                       actually on" has to be answerable from either tab. *@
+                    <div>
+                        @if (SavedRules is null)
+                        {
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                                This library has no saved layout yet.
+                            </MudText>
+                        }
+                        else
+                        {
+                            <div class="d-flex align-center gap-2 flex-wrap">
+                                <MudIcon Icon="@Icons.Material.Filled.CloudDone" Size="Size.Small"
+                                         Color="@(ConventionChanged ? Color.Default : Color.Success)" />
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                    Saved for this library:
+                                    <strong>@(_savedPreset?.Name ?? "a template of your own")</strong>
+                                </MudText>
+                            </div>
+
+                            @* Spelled out when it is not a preset, because the
+                               name alone does not identify it -- and from the
+                               Presets tab it is the only sight of what picking
+                               a preset would replace. *@
+                            @if (_savedPreset is null)
+                            {
+                                <MudText Typo="Typo.caption"
+                                         Class="organize-preset-example d-block ml-6">
+                                    @SavedRules.FolderTemplate@(SavedRules.RenameFiles
+                                        ? $"  ·  {SavedRules.FileTemplate}" : "")
+                                </MudText>
+                            }
+                        }
+
+                        @* Trying a layout out costs nothing; keeping one is a
+                           button. Otherwise looking would overwrite. *@
+                        @if (ConventionChanged)
+                        {
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+                                @* There is no "that" to differ from until
+                                   something has been saved. *@
+                                @if (SavedRules is not null)
+                                {
+                                    <text>What is on screen differs from that.</text>
+                                }
+                                The plan on the right already uses the screen; saving only decides
+                                what you come back to.
+                            </MudText>
+                            <div class="d-flex align-center gap-2 flex-wrap mt-2">
+                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                           StartIcon="@Icons.Material.Filled.Save"
+                                           Disabled="@(!CanSaveConvention)" OnClick="SaveConvention">
+                                    Save for this library
+                                </MudButton>
+                                @if (SavedRules is not null)
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Text"
+                                               OnClick="RevertConvention">
+                                        Back to saved
+                                    </MudButton>
+                                }
+                            </div>
+                        }
+                    </div>
                 </MudStack>
             </MudPaper>
         </MudItem>
@@ -249,8 +392,15 @@ else
                                belongs where the eye already is. *@
                             <MudTd DataLabel="What happens">
                                 @{
-                                    var moving = context.FileIds.Count
-                                        - context.Deletions.Count - context.Conflicts.Count;
+                                    // Nothing moves off a row whose folder is
+                                    // already right, however many files it
+                                    // holds. "3 moved" beside "folder already
+                                    // right" was counting the files it was
+                                    // about to leave exactly where they are.
+                                    var moving = context.Outcome == MoveOutcome.Move
+                                        ? context.FileIds.Count
+                                            - context.Deletions.Count - context.Conflicts.Count
+                                        : 0;
                                 }
                                 <div class="d-flex flex-wrap gap-1">
                                     @* Only when something actually moves. "0 moved"
@@ -299,9 +449,24 @@ else
                                 @switch (context.Outcome)
                                 {
                                     case MoveOutcome.AlreadyThere:
+                                        @* "Already there" on its own used to be
+                                           the whole answer, which was a lie the
+                                           moment renaming was on: the folder is
+                                           right and every file in it is still
+                                           being renamed. *@
                                         <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                            &mdash; already there
+                                            @(context.Renames.Count > 0
+                                                ? "folder already right"
+                                                : "— already there")
                                         </MudText>
+                                        @if (!_chosen.Contains(context.ModelId)
+                                             && _actionable.Contains(context.ModelId))
+                                        {
+                                            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                                &mdash; not this run
+                                            </MudText>
+                                        }
+                                        <RenamePreview Renames="context.Renames" />
                                         break;
                                     case MoveOutcome.Collides:
                                     case MoveOutcome.Unusable:
@@ -317,12 +482,14 @@ else
                                            path with "left alone" would hide the
                                            very thing being decided about. *@
                                         <MudText Typo="Typo.caption" Class="path-cell">@context.To</MudText>
-                                        @if (!_chosen.Contains(context.ModelId))
+                                        @if (!_chosen.Contains(context.ModelId)
+                                             && _actionable.Contains(context.ModelId))
                                         {
                                             <MudText Typo="Typo.caption" Class="mud-text-secondary">
                                                 &mdash; not this run
                                             </MudText>
                                         }
+                                        <RenamePreview Renames="context.Renames" />
                                         break;
                                 }
                             </MudTd>
@@ -342,7 +509,7 @@ else
                             settings first.
                         </MudAlert>
                     }
-                    else if (_plan.Moving == 0 && _plan.Deletions.Count == 0)
+                    else if (_plan.IsEmpty)
                     {
                         <MudAlert Severity="Severity.Success" Dense="true">
                             Everything is already where these rules want it.
@@ -363,7 +530,9 @@ else
                            button does. *@
                         <MudText Typo="Typo.h6" Class="mb-2">Apply this plan</MudText>
                         <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
-                            Moves <strong>@Chosen.Moving</strong> folder(s) worth of files inside
+                            Moves <strong>@Chosen.Moving</strong> folder(s) worth of files@(Chosen.Renames > 0
+                                ? $", renames {Chosen.Renames} file(s)"
+                                : "") inside
                             <code>@_library.Path</code>@(Chosen.Deletions.Count > 0
                                 ? $" and deletes {Chosen.Deletions.Count} file(s) that would collide"
                                 : "").
@@ -540,6 +709,12 @@ else
     private string _folderTemplate = DefaultFolderTemplate;
     private string _fileTemplate = DefaultFileTemplate;
     private bool _renameFiles;
+
+    // AsWritten by default, which renders a template exactly as typed. That is
+    // what every library had before there was a choice, and what the migration
+    // left them holding.
+    private NameCase _folderCase;
+    private NameCase _fileCase;
     private bool _onlyChanges = true;
     private List<string> _folderProblems = [];
     private List<string> _fileProblems = [];
@@ -675,6 +850,14 @@ else
             _folderTemplate = _library.FolderTemplate ?? _folderTemplate;
             _fileTemplate = _library.FileTemplate ?? _fileTemplate;
             _renameFiles = _library.RenameFiles;
+            _folderCase = _library.FolderCase;
+            _fileCase = _library.FileCase;
+
+            // Opened on whichever tab describes what this library already does.
+            // Someone who settled on a template of their own should not have to
+            // find it again on every visit.
+            _tab = _preset is null ? CustomTab : PresetsTab;
+
             await Replan();
         }
     }
@@ -684,6 +867,91 @@ else
     private async Task OnRenameToggled(bool value)
     {
         _renameFiles = value;
+        await Replan();
+    }
+
+    /// <summary>
+    /// The preset the controls currently add up to, or null for a template of
+    /// somebody's own.
+    /// </summary>
+    /// <remarks>
+    /// Derived rather than stored. Editing a template by hand until it matches
+    /// a preset again should select that preset, and a remembered answer would
+    /// disagree with the fields sitting right under it.
+    /// </remarks>
+    private OrganizePreset? _preset => OrganizePresets.Matching(CurrentRules);
+
+    /// <summary>
+    /// What this library has stored, or null while it has never been organized.
+    /// </summary>
+    private OrganizeRules? SavedRules => _library?.FolderTemplate is null ? null : new OrganizeRules
+    {
+        FolderTemplate = _library.FolderTemplate,
+        FileTemplate = _library.FileTemplate ?? DefaultFileTemplate,
+        RenameFiles = _library.RenameFiles,
+        FolderCase = _library.FolderCase,
+        FileCase = _library.FileCase,
+    };
+
+    /// <summary>
+    /// The preset this library has saved, marked in the list so "which one is
+    /// this library actually on" is answered on the row rather than underneath
+    /// all of them. Null when what is saved is a template of somebody's own.
+    /// </summary>
+    private OrganizePreset? _savedPreset =>
+        SavedRules is { } saved ? OrganizePresets.Matching(saved) : null;
+
+    // Which of the two the page is showing. Deliberately not derived from
+    // whether a preset matches: switching to Custom to read a template, then
+    // deciding to leave it alone, must not throw you back to Presets. The tab
+    // is where you are, not what your rules are.
+    private int _tab;
+    private const int PresetsTab = 0;
+    private const int CustomTab = 1;
+
+    private async Task ApplyPreset(string? name)
+    {
+        if (OrganizePresets.All.FirstOrDefault(p => p.Name == name) is not { } preset) return;
+
+        _folderTemplate = preset.Rules.FolderTemplate;
+        _folderCase = preset.Rules.FolderCase;
+        _renameFiles = preset.Rules.RenameFiles;
+
+        // Only when the preset renames. Otherwise picking "By designer" would
+        // quietly reset a file template somebody had settled on, and switching
+        // back would not bring it back.
+        if (preset.Rules.RenameFiles)
+        {
+            _fileTemplate = preset.Rules.FileTemplate;
+            _fileCase = preset.Rules.FileCase;
+        }
+
+        await Replan();
+    }
+
+    /// <summary>What is on screen, as the planner and the editor both want it.</summary>
+    private OrganizeRules CurrentRules => new()
+    {
+        FolderTemplate = _folderTemplate,
+        FileTemplate = _fileTemplate,
+        RenameFiles = _renameFiles,
+        FolderCase = _folderCase,
+
+        // Only meaningful when renaming is on, and deliberately not zeroed when
+        // it is off: turning the switch back on should find the choice where it
+        // was left rather than reset to "leave as written".
+        FileCase = _fileCase,
+    };
+
+    private async Task OnFolderCaseChanged(NameCase value)
+    {
+        _folderCase = value;
+        await Replan();
+    }
+
+    private async Task OnFileCaseChanged(NameCase value)
+    {
+        _fileCase = value;
         await Replan();
     }
 
@@ -701,12 +969,7 @@ else
                 .ToList()
             : [];
 
-        var rules = new OrganizeRules
-        {
-            FolderTemplate = _folderTemplate,
-            FileTemplate = _fileTemplate,
-            RenameFiles = _renameFiles,
-        };
+        var rules = CurrentRules;
 
         // Whether the whole plan was taken before this replan, so that stays
         // true across a template tweak. Anyone who narrowed it down keeps their
@@ -715,12 +978,7 @@ else
 
         _plan = await Planner.PlanAsync(LibraryId, rules);
 
-        _actionable =
-        [
-            .. _plan.Moves
-                .Where(m => m.Outcome == MoveOutcome.Move)
-                .Select(m => m.ModelId),
-        ];
+        _actionable = [.. _plan.ActionableModelIds];
 
         if (wasEverything)
         {
@@ -747,7 +1005,9 @@ else
     private bool ConventionChanged =>
         _folderTemplate != (_library?.FolderTemplate ?? "")
         || (_renameFiles && _fileTemplate != (_library?.FileTemplate ?? ""))
-        || _renameFiles != (_library?.RenameFiles ?? false);
+        || _renameFiles != (_library?.RenameFiles ?? false)
+        || _folderCase != (_library?.FolderCase ?? NameCase.AsWritten)
+        || (_renameFiles && _fileCase != (_library?.FileCase ?? NameCase.AsWritten));
 
     private bool CanSaveConvention =>
         ConventionChanged
@@ -757,12 +1017,7 @@ else
 
     private async Task SaveConvention()
     {
-        var rules = new OrganizeRules
-        {
-            FolderTemplate = _folderTemplate,
-            FileTemplate = _fileTemplate,
-            RenameFiles = _renameFiles,
-        };
+        var rules = CurrentRules;
 
         await Editor.SetOrganizeRulesAsync(LibraryId, rules);
 
@@ -777,6 +1032,8 @@ else
         _folderTemplate = _library?.FolderTemplate ?? DefaultFolderTemplate;
         _fileTemplate = _library?.FileTemplate ?? DefaultFileTemplate;
         _renameFiles = _library?.RenameFiles ?? false;
+        _folderCase = _library?.FolderCase ?? NameCase.AsWritten;
+        _fileCase = _library?.FileCase ?? NameCase.AsWritten;
         await Replan();
     }
 

@@ -346,10 +346,48 @@ html, body {
 }
 .organize-tokens span { color: var(--mud-palette-text-secondary); }
 
+/* A preset is a whole answer, so its row carries three lines: the name, what
+   it does, and one path it would produce. Radios lay their label out inline by
+   default, which would run all three together. */
+.organize-preset { align-items: flex-start; margin-bottom: 10px; }
+.organize-preset .mud-radio-content { margin-top: 2px; }
+.organize-preset-example {
+    font-family: ui-monospace, monospace;
+    font-size: .7rem;
+    color: var(--mud-palette-info);
+    overflow-wrap: anywhere;
+}
+
+/* Presets and Custom are peers, so the tabs sit flush with the panel rather
+   than floating in it. */
+.organize-modes .mud-tabs-tabbar { border-bottom: 1px solid var(--mud-palette-lines-default); }
+.organize-modes .mud-tab { min-width: 0; padding: 0 16px; }
+
 /* A row the plan describes but this run will leave alone. Dimmed rather
    than hidden: what is *not* about to happen is the point of unticking
    it, and a row that vanished would read as one already dealt with. */
 .organize-skipped td:not(:first-child) { opacity: .45; }
+
+/* What each file inside a model would be called. Laid out as a grid so the
+   arrows line up down the column and the shape of the rule is readable at a
+   glance rather than one name at a time. */
+.organize-renames {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr);
+    align-items: baseline;
+    gap: 1px 6px;
+    font-family: ui-monospace, monospace;
+    font-size: .7rem;
+    max-width: 460px;
+}
+.organize-renames span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.organize-renames .rename-from { color: var(--mud-palette-text-disabled); }
+.organize-renames .rename-arrow { color: var(--mud-palette-text-disabled); }
+.organize-renames .rename-to { color: var(--mud-palette-info); }
 
 /* Paints ------------------------------------------------------------------ */
 

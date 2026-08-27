@@ -107,7 +107,11 @@ public static class PathTemplate
     /// collapsing the segment, so a model with no designer lands somewhere
     /// obvious instead of at the library root among the organised ones.
     /// </remarks>
-    public static string Render(string template, IReadOnlyDictionary<string, string?> values, bool forFile)
+    public static string Render(
+        string template,
+        IReadOnlyDictionary<string, string?> values,
+        bool forFile,
+        NameCase casing = NameCase.AsWritten)
     {
         var rendered = new StringBuilder();
 
@@ -129,8 +133,16 @@ public static class PathTemplate
 
         // Split on both separators: someone typing a Windows-style template
         // means the same thing by it.
+        //
+        // Casing runs per segment and before sanitising. Per segment because it
+        // treats anything that is not a letter or digit as a word break, so a
+        // whole path handed to it would come back with the slashes eaten.
+        // Before, because sanitising is what has the last word on length,
+        // trailing dots and reserved device names -- a casing pass that ran
+        // afterwards could turn "_CON" back into "con".
         var segments = rendered.ToString()
             .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => NameCasing.Apply(s, casing))
             .Select(Sanitize)
             .Where(s => s.Length > 0)
             .ToList();

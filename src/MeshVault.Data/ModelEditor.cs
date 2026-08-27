@@ -717,7 +717,9 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
             .ExecuteUpdateAsync(s => s
                 .SetProperty(l => l.FolderTemplate, rules.FolderTemplate)
                 .SetProperty(l => l.FileTemplate, rules.FileTemplate)
-                .SetProperty(l => l.RenameFiles, rules.RenameFiles), ct);
+                .SetProperty(l => l.RenameFiles, rules.RenameFiles)
+                .SetProperty(l => l.FolderCase, rules.FolderCase)
+                .SetProperty(l => l.FileCase, rules.FileCase), ct);
     }
 
     public async Task RemoveLibraryAsync(int libraryId, CancellationToken ct = default)

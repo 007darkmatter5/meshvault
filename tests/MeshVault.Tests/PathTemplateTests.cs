@@ -176,4 +176,66 @@ public class PathTemplateTests
 
         Assert.Equal("Dragon - presupported", rendered);
     }
+
+    private static string Render(string template, NameCase casing,
+        params (string Key, string? Value)[] values) =>
+        PathTemplate.Render(
+            template, values.ToDictionary(v => v.Key, v => v.Value), forFile: false, casing);
+
+    [Fact]
+    public void A_casing_convention_applies_to_each_segment_separately()
+    {
+        // The separators have to survive. NameCasing treats anything that is
+        // not a letter or digit as a word break, so a whole path handed to it
+        // would come back as one long folder name.
+        Assert.Equal("prusa-research/3d-benchy-v2",
+            Render("{designer}/{model}", NameCase.Kebab,
+                ("designer", "Prusa Research"), ("model", "3DBenchy V2")));
+    }
+
+    [Fact]
+    public void Literal_text_in_the_template_is_cased_along_with_the_tokens()
+    {
+        // The convention governs the whole name, not just the parts that came
+        // out of a token. Leaving " by " uncased would produce "prusa-By-..."
+        // and read as a bug.
+        Assert.Equal("by-prusa/3d-benchy",
+            Render("by {designer}/{model}", NameCase.Kebab,
+                ("designer", "Prusa"), ("model", "3DBenchy")));
+    }
+
+    [Fact]
+    public void A_fallback_placeholder_is_cased_like_anything_else()
+    {
+        Assert.Equal("unsorted/3d-benchy",
+            Render("{designer}/{model}", NameCase.Kebab, ("model", "3DBenchy")));
+    }
+
+    [Fact]
+    public void A_value_still_cannot_climb_out_of_the_library()
+    {
+        // Sanitising runs after casing, so it keeps the last word on the things
+        // that matter: a token that tried to introduce a separator is already
+        // neutralised before casing sees it.
+        Assert.Equal("cinderwing3d-dragons/wall",
+            Render("{designer}/{model}", NameCase.Kebab,
+                ("designer", "Cinderwing3D/Dragons"), ("model", "Wall")));
+    }
+
+    [Fact]
+    public void A_reserved_device_name_is_still_escaped_after_casing()
+    {
+        // Casing runs first for exactly this reason. Run it afterwards and the
+        // underscore Sanitize added would be eaten as a word break, handing
+        // "con" straight back to Windows.
+        Assert.Equal("_con", Render("{model}", NameCase.Kebab, ("model", "CON")));
+    }
+
+    [Fact]
+    public void Leave_as_written_renders_the_way_it_always_did()
+    {
+        Assert.Equal("Prusa Research/3DBenchy V2",
+            Render("{designer}/{model}", NameCase.AsWritten,
+                ("designer", "Prusa Research"), ("model", "3DBenchy V2")));
+    }
 }

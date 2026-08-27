@@ -326,5 +326,229 @@ public class OrganizePlannerTests : IDisposable
         Assert.Empty(plan.VacancyNeeded(new HashSet<int> { a }));
     }
 
+    [Fact]
+    public async Task A_casing_convention_reaches_folders_and_files_separately()
+    {
+        var id = await NewModel("Spring Dragon", "dragon", "Wall 01.stl");
+        await _editor.SetDesignerAsync(id, "Cinderwing3D");
+
+        var plan = await Plan(new OrganizeRules
+        {
+            RenameFiles = true,
+            FolderCase = NameCase.Pascal,
+            FileCase = NameCase.Kebab,
+        });
+
+        Assert.Equal("Cinderwing3D/SpringDragon", plan.Moves[0].To);
+        Assert.Equal("spring-dragon-wall-01.stl", Assert.Single(plan.Moves[0].Renames).To);
+    }
+
+    [Fact]
+    public async Task The_extension_keeps_its_own_case_whatever_the_convention()
+    {
+        // The extension is what tells every other program on the machine what
+        // the file is, so it is appended after rendering rather than templated.
+        var id = await NewModel("Dragon", "dragon", "body.STL");
+        await _editor.SetDesignerAsync(id, "Cinderwing3D");
+
+        var plan = await Plan(new OrganizeRules
+        {
+            RenameFiles = true, FileTemplate = "{model}", FileCase = NameCase.Kebab,
+        });
+
+        Assert.Equal("dragon.STL", Assert.Single(plan.Moves[0].Renames).To);
+    }
+
+    [Fact]
+    public async Task A_numbered_duplicate_obeys_the_convention_too()
+    {
+        // "dragon (2).stl" is not kebab-case, and a rule that held for every
+        // name but the duplicates would be worse than no rule at all.
+        var id = await NewModel("Dragon", "dragon", "a.stl", "b.stl");
+        await _editor.SetDesignerAsync(id, "Cinderwing3D");
+
+        var plan = await Plan(new OrganizeRules
+        {
+            RenameFiles = true, FileTemplate = "{model}", FileCase = NameCase.Kebab,
+        });
+        var names = plan.Moves[0].Renames.Select(r => r.To).ToList();
+
+        Assert.Equal(names.Count, names.Distinct().Count());
+        Assert.Contains("dragon-2.stl", names);
+    }
+
+    [Fact]
+    public async Task Leaving_the_casing_alone_plans_exactly_what_it_always_did()
+    {
+        var id = await NewModel("Spring Dragon", "dragon", "Wall 01.stl");
+        await _editor.SetDesignerAsync(id, "Cinderwing3D");
+
+        var plan = await Plan(new OrganizeRules { RenameFiles = true });
+
+        Assert.Equal("Cinderwing3D/Spring Dragon", plan.Moves[0].To);
+        Assert.Equal("Spring Dragon - Wall 01.stl", Assert.Single(plan.Moves[0].Renames).To);
+    }
+
+    [Fact]
+    public async Task The_variant_token_carries_which_flavour_a_file_is()
+    {
+        // It rendered "Plain" for every file in the library. That is the one
+        // token that can carry "this one is hollowed" through a rename which
+        // throws the original name away, so a dead one turns an organise into
+        // silent data loss.
+        var id = await NewModel("Wall", "pack", "UD-001-HOL-Wall.stl", "UD-001-Wall.stl");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+
+        await using (var db = _factory.CreateDbContext())
+        {
+            var classifier = new VariantClassifier();
+            var model = await db.Models.Include(m => m.Files).SingleAsync(m => m.Id == id);
+            foreach (var file in model.Files) classifier.Apply(model, file);
+            await db.SaveChangesAsync();
+        }
+
+        var plan = await Plan(new OrganizeRules
+        {
+            RenameFiles = true, FileTemplate = "{model} - {variant}",
+        });
+        var names = plan.Moves.SelectMany(m => m.Renames).Select(r => r.To).ToList();
+
+        Assert.Contains(names, n => n.Contains("Hollowed", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(names, n => n == "Wall - Plain (2).stl" && names.Count(x => x == n) > 1);
+    }
+
+    [Fact]
+    public async Task The_sculpt_token_names_the_mini_a_file_holds()
+    {
+        // It rendered its "Unsorted" fallback for every file, which read as a
+        // template that simply did not work.
+        var id = await NewModel("Pack", "pack", "UD-001-Wall.stl", "UD-002-Door.stl");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+
+        await using (var db = _factory.CreateDbContext())
+        {
+            var classifier = new VariantClassifier();
+            var model = await db.Models.Include(m => m.Files).SingleAsync(m => m.Id == id);
+            foreach (var file in model.Files) classifier.Apply(model, file);
+            await db.SaveChangesAsync();
+        }
+
+        var plan = await Plan(new OrganizeRules
+        {
+            RenameFiles = true, FileTemplate = "{sculpt}",
+        });
+        var names = plan.Moves.SelectMany(m => m.Renames).Select(r => r.To).ToList();
+
+        Assert.NotEmpty(names);
+        Assert.DoesNotContain(names, n => n.StartsWith("Unsorted", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_companion_takes_the_variant_of_the_mesh_it_sits_beside()
+    {
+        // The Lychee project of a hollowed mesh was rendering as "Plain" —
+        // stating the opposite of what the file next to it says, and the
+        // opposite of what the folder it lands in says too.
+        var id = await NewModel("Wall", "pack", "UD-001-HOL-Wall.stl", "UD-001-HOL-Wall.lys");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+
+        await using (var db = _factory.CreateDbContext())
+        {
+            var classifier = new VariantClassifier();
+            var model = await db.Models.Include(m => m.Files).SingleAsync(m => m.Id == id);
+
+            // What a scan does: the .lys is not a mesh, so it is left unkeyed.
+            foreach (var file in model.Files)
+            {
+                file.Kind = file.Extension == ".lys" ? FileKind.Other : FileKind.Mesh;
+                classifier.Apply(model, file);
+            }
+            await db.SaveChangesAsync();
+
+            Assert.Null(model.Files.Single(f => f.Extension == ".lys").VariantLabel);
+        }
+
+        var plan = await Plan(new OrganizeRules
+        {
+            RenameFiles = true, FileTemplate = "{model}-{variant}", FileCase = NameCase.Kebab,
+        });
+        var names = plan.Moves.SelectMany(m => m.Renames).Select(r => r.To).ToList();
+
+        Assert.Contains("wall-hollowed.lys", names);
+        Assert.DoesNotContain("wall-plain.lys", names);
+    }
+
+    [Fact]
+    public async Task Tidying_the_original_names_loses_nothing()
+    {
+        // {file} in kebab-case is only a change of case. The creator already
+        // encoded the variant in the name -- HOL, SUP, NL, and nothing at all
+        // for the plain one -- so nothing has to be reconstructed from
+        // MeshVault's own classification, and nothing can be lost if that
+        // classification is wrong.
+        var id = await NewModel("UD 067 Hole Trap", "pack",
+            "UD-067-HOL-Hole Trap.stl", "UD-067-SUP-Hole Trap.stl",
+            "UD-067-NL-Hole Trap.stl", "UD-067-Hole Trap.stl");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+        var collection = await _editor.CreateCollectionAsync("The Ultimate Dungeon");
+        await _editor.SetCollectionMembershipAsync(id, collection.Id, true);
+
+        await using (var db = _factory.CreateDbContext())
+        {
+            var classifier = new VariantClassifier();
+            var model = await db.Models.Include(m => m.Files).SingleAsync(m => m.Id == id);
+            foreach (var f in model.Files) classifier.Apply(model, f);
+            await db.SaveChangesAsync();
+        }
+
+        var rules = new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{collection}/{sculpt}",
+            RenameFiles = true,
+            FileTemplate = "{file}",
+            FileCase = NameCase.Kebab,
+        };
+
+        var paths = (await Plan(rules))
+            .Moves.SelectMany(m => m.Renames.Select(r => $"{m.To}/{r.To}"))
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal(
+        [
+            "Dungeon Blocks/The Ultimate Dungeon/UD 067 Hole Trap/ud-067-hol-hole-trap.stl",
+            "Dungeon Blocks/The Ultimate Dungeon/UD 067 Hole Trap/ud-067-hole-trap.stl",
+            "Dungeon Blocks/The Ultimate Dungeon/UD 067 Hole Trap/ud-067-nl-hole-trap.stl",
+            "Dungeon Blocks/The Ultimate Dungeon/UD 067 Hole Trap/ud-067-sup-hole-trap.stl",
+        ], paths);
+
+        // Four distinct names out of four files, with no numbering. Renaming to
+        // a scheme that has to invent the distinguishing part is where "(2)"
+        // comes from; keeping the original name cannot collide, because those
+        // names were already unique on disk.
+        Assert.Equal(4, paths.Distinct().Count());
+        Assert.DoesNotContain(paths, p => p.Contains("-2."));
+    }
+
+    [Fact]
+    public async Task Tidying_the_original_names_settles_after_one_pass()
+    {
+        // A name already in the convention renders to itself, so there is
+        // nothing left to do on a second run. A scheme that kept finding work
+        // would be one you could never finish applying.
+        var id = await NewModel("Hole Trap", "Dungeon Blocks/Hole Trap", "ud-067-hol-hole-trap.stl");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+
+        var plan = await Plan(new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{model}",
+            RenameFiles = true,
+            FileTemplate = "{file}",
+            FileCase = NameCase.Kebab,
+        });
+
+        Assert.Equal(0, plan.Renames);
+    }
+
     public void Dispose() => _conn.Dispose();
 }
