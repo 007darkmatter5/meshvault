@@ -121,6 +121,8 @@ public class OrganizeExecutor(
                 sourceFolders.Add(source.RelativePath);
             }
 
+            MatchCaseOnDisk(root, group.Key, problems);
+
             try
             {
                 if (!Directory.Exists(destination))
@@ -300,6 +302,71 @@ public class OrganizeExecutor(
         move.To.Length > 0
         && (move.Outcome == MoveOutcome.Move
             || (move.Outcome == MoveOutcome.AlreadyThere && move.Renames.Count > 0));
+
+    /// <summary>
+    /// Respells folders that already exist under a different case, so the disk
+    /// says what the plan says.
+    /// </summary>
+    /// <remarks>
+    /// The one place this class touches a folder rather than a file, and it is
+    /// not really a move: the entry keeps its parent and its identity and only
+    /// changes how it is spelled, which is a single atomic rename with nothing
+    /// crossing between two places. The rule it is exempt from exists because a
+    /// half-done folder move leaves files somewhere nothing recorded.
+    ///
+    /// Without it a case-only change never reaches a case-insensitive share —
+    /// an SMB mount is how most people reach one. CreateDirectory sees the old
+    /// spelling and does nothing, File.Move resolves both paths to the same
+    /// file, and the database is left recording a folder that is not the one on
+    /// disk. That mismatch is the expensive kind: LibraryIndexer reconciles on
+    /// RelativePath with an ordinal comparer, so the next scan reads it as one
+    /// model deleted and another added, and the tags, notes, collections and
+    /// grouping go with it.
+    ///
+    /// A case-sensitive filesystem needs none of this and gets none: the wanted
+    /// folder genuinely does not exist there, so this returns and the ordinary
+    /// path creates it, moves the files in and prunes the empty original.
+    /// </remarks>
+    private static void MatchCaseOnDisk(string root, string relative, List<string> problems)
+    {
+        var current = root;
+
+        foreach (var segment in relative.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var wanted = Path.Combine(current, segment);
+            if (!Directory.Exists(wanted)) return;
+
+            var matches = Directory.GetDirectories(current)
+                .Where(d => string.Equals(
+                    Path.GetFileName(d), segment, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            // Already spelled right, or two folders differ only by case and
+            // renaming one onto the other would lose it. Neither is ours to
+            // touch.
+            var needsRespelling =
+                matches.Count == 1
+                && !string.Equals(
+                    Path.GetFileName(matches[0]), segment, StringComparison.Ordinal);
+
+            if (needsRespelling)
+            {
+                try
+                {
+                    Directory.Move(matches[0], wanted);
+                }
+                catch (Exception ex)
+                {
+                    problems.Add(
+                        $"{Path.GetFileName(matches[0])} could not be respelled as {segment}: "
+                        + $"{ex.Message}");
+                    return;
+                }
+            }
+
+            current = wanted;
+        }
+    }
 
     private record Owner(ModelEntry Model, bool IsNew);
 

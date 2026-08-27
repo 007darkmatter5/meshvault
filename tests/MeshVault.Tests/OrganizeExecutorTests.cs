@@ -550,6 +550,51 @@ public class OrganizeExecutorTests : IDisposable
         Assert.True(result.Clean, string.Join("; ", result.Problems));
     }
 
+    [Fact]
+    public async Task A_folder_whose_only_change_is_case_is_renamed_on_disk()
+    {
+        await NewModel("Dungeon Blocks/wall", "Wall.stl");
+
+        // Say by hand that the sculpt is "Wall", so {sculpt} wants a capital.
+        await using (var seed = _factory.CreateDbContext())
+        {
+            var file = await seed.Files.SingleAsync();
+            file.SculptName = "Wall";
+            file.SculptKey = VariantClassifier.NormalizeKey("Wall");
+            file.VariantSetByUser = true;
+            await seed.SaveChangesAsync();
+        }
+
+        var plan = await _planner.PlanAsync(1, new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{sculpt}",
+        });
+
+        var result = await _executor.ApplyAsync(1, plan);
+        Assert.True(result.Clean, string.Join("; ", result.Problems));
+
+        var onDisk = Directory.GetDirectories(Path.Combine(_root, "Dungeon Blocks"))
+            .Select(Path.GetFileName).ToList();
+
+        Assert.Equal(["Wall"], onDisk);
+
+        // What the mismatch would have cost. LibraryIndexer reconciles on
+        // RelativePath with an ordinal comparer, so a folder left spelled the
+        // old way reads as one model deleted and another added on the next
+        // scan -- and the tags go with it.
+        await using var db = _factory.CreateDbContext();
+        var model = await db.Models.SingleAsync();
+
+        Assert.Equal("Dungeon Blocks/Wall", model.RelativePath);
+        Assert.True(
+            Directory.Exists(Path.Combine(_root, model.RelativePath.Replace('/', Path.DirectorySeparatorChar))),
+            "the database records a folder that is not the one on disk");
+
+        var folders = Directory.GetDirectories(Path.Combine(_root, "Dungeon Blocks"));
+        Assert.Single(folders);
+    }
+
+
     public void Dispose()
     {
         _conn.Dispose();
