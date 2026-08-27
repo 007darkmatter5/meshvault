@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 dotnet build                                  # whole solution
-dotnet test                                   # all 437 tests, ~6s
+dotnet test                                   # all 443 tests, ~6s
 dotnet run --project src/MeshVault.Web        # http://localhost:5082 in Development
 
 # One class, or one test
@@ -148,6 +148,12 @@ Rules the executor will not bend:
   `LibraryIndexer` clears when bytes move, so a stored hash is current or absent, never stale.
 - Every file must end up inside its model's folder. A file blocked by a clash while its model moved
   gets a row of its own at the folder it is actually in (`RehomeStrandedAsync`).
+
+The page can run against a subset. Ticks are per model, and `OrganizePlan.For` narrows the plan
+before it is handed over — narrowing only ever drops rows, so what runs is a subset of what was on
+screen rather than a second plan. `VacancyNeeded` warns about the one case narrowing breaks: the
+planner allows a destination whose occupant is leaving in the same run, and leaving that occupant
+unticked means the folder is still there.
 
 It runs on a background task via `OrganizeService`, like scans. Doing several hundred blocking file
 moves on the circuit's thread leaves the page unable to render the progress it is being handed — it

@@ -259,5 +259,72 @@ public class OrganizePlannerTests : IDisposable
         Assert.False(plan.IsEmpty);
     }
 
+    [Fact]
+    public async Task Narrowing_a_plan_keeps_only_the_chosen_models()
+    {
+        var a = await NewModel("A", "loose/a", "a.stl");
+        await _editor.SetDesignerAsync(a, "Prusa");
+        var b = await NewModel("B", "loose/b", "b.stl");
+        await _editor.SetDesignerAsync(b, "Prusa");
+
+        var plan = await Plan();
+        Assert.Equal(2, plan.Moving);
+
+        var narrowed = plan.For(new HashSet<int> { a });
+
+        Assert.Equal(1, narrowed.Moving);
+        Assert.All(narrowed.Moves, m => Assert.Equal(a, m.ModelId));
+    }
+
+    [Fact]
+    public async Task Narrowing_a_plan_cannot_add_a_move_of_its_own()
+    {
+        var a = await NewModel("A", "loose/a", "a.stl");
+        await _editor.SetDesignerAsync(a, "Prusa");
+
+        var plan = await Plan();
+
+        // Asking for a model the plan never mentioned yields nothing rather
+        // than inventing a destination for it. What runs is always a subset of
+        // what was on screen.
+        var narrowed = plan.For(new HashSet<int> { a, 9999 });
+
+        Assert.Equal(plan.Moves.Count, narrowed.Moves.Count);
+    }
+
+    [Fact]
+    public async Task A_folder_a_left_out_model_still_sits_in_is_called_out()
+    {
+        // A wants B's folder, and the planner allowed it only because B is
+        // leaving in the same run. Run A alone and B is still there.
+        var a = await NewModel("Wall", "loose/wall", "wall.stl");
+        await _editor.SetDesignerAsync(a, "Prusa");
+        var b = await NewModel("Other", "Prusa/Wall", "other.stl");
+        await _editor.SetDesignerAsync(b, "Elegoo");
+
+        var plan = await Plan();
+        Assert.Equal(2, plan.Moving);
+
+        var blocked = plan.VacancyNeeded(new HashSet<int> { a });
+
+        Assert.Equal(b, Assert.Single(blocked).ModelId);
+
+        // Take both and there is nothing left to warn about.
+        Assert.Empty(plan.VacancyNeeded(new HashSet<int> { a, b }));
+    }
+
+    [Fact]
+    public async Task Models_that_do_not_want_each_other_s_folders_raise_nothing()
+    {
+        var a = await NewModel("A", "loose/a", "a.stl");
+        await _editor.SetDesignerAsync(a, "Prusa");
+        var b = await NewModel("B", "loose/b", "b.stl");
+        await _editor.SetDesignerAsync(b, "Prusa");
+
+        var plan = await Plan();
+
+        Assert.Empty(plan.VacancyNeeded(new HashSet<int> { a }));
+    }
+
     public void Dispose() => _conn.Dispose();
 }

@@ -346,6 +346,11 @@ html, body {
 }
 .organize-tokens span { color: var(--mud-palette-text-secondary); }
 
+/* A row the plan describes but this run will leave alone. Dimmed rather
+   than hidden: what is *not* about to happen is the point of unticking
+   it, and a row that vanished would read as one already dealt with. */
+.organize-skipped td:not(:first-child) { opacity: .45; }
+
 /* Paints ------------------------------------------------------------------ */
 
 .paint-swatch {

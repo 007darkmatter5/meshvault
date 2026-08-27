@@ -434,6 +434,50 @@ public class OrganizeExecutorTests : IDisposable
         Assert.True(again.Clean, string.Join("; ", again.Problems));
     }
 
+    [Fact]
+    public async Task Only_the_chosen_models_are_moved()
+    {
+        var wall = await NewModel("inbox/wall", "Wall.stl");
+        await NewModel("inbox/door", "Door.stl");
+
+        var plan = await _planner.PlanAsync(1, new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{sculpt}",
+        });
+
+        var result = await _executor.ApplyAsync(1, plan.For(new HashSet<int> { wall.Id }));
+
+        Assert.True(result.Clean, string.Join("; ", result.Problems));
+        Assert.Equal(1, result.FilesMoved);
+
+        Assert.True(Exists("Dungeon Blocks/Wall/Wall.stl"));
+        Assert.True(Exists("inbox/door/Door.stl"));
+
+        // The one left out keeps its row and its path, so the next scan still
+        // recognises it rather than reading a delete plus an add.
+        await using var db = _factory.CreateDbContext();
+        var door = await db.Models.Include(m => m.Files)
+            .SingleAsync(m => m.RelativePath == "inbox/door");
+        Assert.Equal("inbox/door/Door.stl", Assert.Single(door.Files).RelativePath);
+    }
+
+    [Fact]
+    public async Task Choosing_nothing_moves_nothing()
+    {
+        await NewModel("inbox/wall", "Wall.stl");
+
+        var plan = await _planner.PlanAsync(1, new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{sculpt}",
+        });
+
+        var result = await _executor.ApplyAsync(1, plan.For(new HashSet<int>()));
+
+        Assert.Equal(0, result.FilesMoved);
+        Assert.Equal(0, result.ModelsRemoved);
+        Assert.True(Exists("inbox/wall/Wall.stl"));
+    }
+
     public void Dispose()
     {
         _conn.Dispose();

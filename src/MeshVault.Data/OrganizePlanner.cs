@@ -150,6 +150,54 @@ public record OrganizePlan(IReadOnlyList<PlannedMove> Moves)
 
     /// <summary>Nothing to do, so applying would be a no-op.</summary>
     public bool IsEmpty => Moving == 0 && Renames == 0 && Deletions.Count == 0;
+
+    /// <summary>Every model this plan has something to say about.</summary>
+    public IReadOnlyList<int> ModelIds => [.. Moves.Select(m => m.ModelId).Distinct()];
+
+    /// <summary>
+    /// The same plan narrowed to a chosen set of models.
+    /// </summary>
+    /// <remarks>
+    /// Narrowing here rather than planning again is deliberate: what is applied
+    /// is then literally a subset of the rows that were read on screen, so a
+    /// destination cannot quietly differ between looking and pressing. Deletions,
+    /// conflicts and the fallback counts all hang off <see cref="Moves"/>, so
+    /// they narrow with it.
+    ///
+    /// A plan is only ever narrowed, never widened, so nothing here can invent a
+    /// move the planner did not already agree to.
+    /// </remarks>
+    public OrganizePlan For(IReadOnlySet<int> modelIds) =>
+        new([.. Moves.Where(m => modelIds.Contains(m.ModelId))]);
+
+    /// <summary>
+    /// Left-out models whose folder a chosen model is being sent into.
+    /// </summary>
+    /// <remarks>
+    /// The planner let that destination through because the model sitting in it
+    /// was moving out in the same run. Leave that one behind and the folder is
+    /// still occupied: nothing is overwritten — the executor refuses that — but
+    /// the two sets end up sharing a folder and a row, which is not what either
+    /// row on screen said would happen. Worth saying before the button, not
+    /// after.
+    /// </remarks>
+    public IReadOnlyList<PlannedMove> VacancyNeeded(IReadOnlySet<int> modelIds)
+    {
+        var wanted = Moves
+            .Where(m => modelIds.Contains(m.ModelId) && m.Outcome == MoveOutcome.Move)
+            .Select(m => m.To)
+            .Where(to => to.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return
+        [
+            .. Moves
+                .Where(m => !modelIds.Contains(m.ModelId) && m.Outcome == MoveOutcome.Move)
+                .Where(m => wanted.Contains(m.From))
+                .GroupBy(m => m.ModelId)
+                .Select(g => g.First()),
+        ];
+    }
 }
 
 /// <summary>

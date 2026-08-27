@@ -193,20 +193,50 @@ else
                 <MudPaper Outlined="true">
                     <MudTable Items="_plan.Moves" Dense="true" Hover="true" Elevation="0"
                               Breakpoint="Breakpoint.Sm" RowsPerPage="25"
-                              Filter="@(new Func<PlannedMove, bool>(Show))">
+                              Filter="@(new Func<PlannedMove, bool>(Show))"
+                              RowClassFunc="@((m, _) => SkipClass(m))">
                         <ToolBarContent>
                             <MudText Typo="Typo.subtitle2">Every model</MudText>
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                     Class="ml-3 my-0">
+                                @_chosen.Count of @_actionable.Count chosen
+                            </MudChip>
                             <MudSpacer />
+                            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="ChooseAll"
+                                       Disabled="@(_chosen.Count == _actionable.Count)">All</MudButton>
+                            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="ChooseNone"
+                                       Disabled="@(_chosen.Count == 0)">None</MudButton>
                             <MudSwitch @bind-Value="_onlyChanges" Color="Color.Primary" T="bool"
                                        Label="Only what would change" />
                         </ToolBarContent>
                         <HeaderContent>
+                            @* Selection is per model, not per row. A pack that
+                               splits into ninety-eight folders shows ninety-eight
+                               rows, and breaking it up halfway is not a thing
+                               anyone means to ask for -- the decision is "this
+                               model or not". *@
+                            <MudTh Style="width:1px">
+                                <MudCheckBox T="bool?" Value="@AllChosen" ValueChanged="ChooseAllToggled"
+                                             Color="Color.Primary" Dense="true" TriState="true"
+                                             Disabled="@(_actionable.Count == 0)" />
+                            </MudTh>
                             <MudTh>Model</MudTh>
                             <MudTh>What happens</MudTh>
                             <MudTh>Now</MudTh>
                             <MudTh>Would become</MudTh>
                         </HeaderContent>
                         <RowTemplate>
+                            <MudTd DataLabel="Include">
+                                @* Nothing would happen to this row anyway, so a
+                                   box that could be ticked would only promise
+                                   something. *@
+                                @if (_actionable.Contains(context.ModelId))
+                                {
+                                    <MudCheckBox T="bool" Dense="true" Color="Color.Primary"
+                                                 Value="@_chosen.Contains(context.ModelId)"
+                                                 ValueChanged="@(v => Choose(context.ModelId, v))" />
+                                }
+                            </MudTd>
                             <MudTd DataLabel="Model">
                                 <MudLink Href="@($"/model/{context.ModelId}")">
                                     <MudText Typo="Typo.caption">@context.ModelName</MudText>
@@ -282,7 +312,17 @@ else
                                         </MudTooltip>
                                         break;
                                     default:
+                                        @* Where it would go stays visible even
+                                           when it is not going. Replacing the
+                                           path with "left alone" would hide the
+                                           very thing being decided about. *@
                                         <MudText Typo="Typo.caption" Class="path-cell">@context.To</MudText>
+                                        @if (!_chosen.Contains(context.ModelId))
+                                        {
+                                            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                                &mdash; not this run
+                                            </MudText>
+                                        }
                                         break;
                                 }
                             </MudTd>
@@ -308,27 +348,76 @@ else
                             Everything is already where these rules want it.
                         </MudAlert>
                     }
+                    else if (_chosen.Count == 0)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true">
+                            Nothing is ticked, so there is nothing to apply. Tick the models you want
+                            moved, or press <strong>All</strong> above to take the whole plan.
+                        </MudAlert>
+                    }
                     else
                     {
+                        @* Everything from here down describes the ticked models
+                           rather than the whole plan. The counts above are what
+                           the rules say about the library; these are what the
+                           button does. *@
                         <MudText Typo="Typo.h6" Class="mb-2">Apply this plan</MudText>
                         <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
-                            Moves <strong>@_plan.Moving</strong> folder(s) worth of files inside
-                            <code>@_library.Path</code>@(_plan.Deletions.Count > 0
-                                ? $" and deletes {_plan.Deletions.Count} file(s) that would collide"
+                            Moves <strong>@Chosen.Moving</strong> folder(s) worth of files inside
+                            <code>@_library.Path</code>@(Chosen.Deletions.Count > 0
+                                ? $" and deletes {Chosen.Deletions.Count} file(s) that would collide"
                                 : "").
                             Files move; nothing is copied, and the catalog is rewritten to match as
                             it goes, so your tags and notes follow their models.
+                            @if (_chosen.Count < _actionable.Count)
+                            {
+                                <text>
+                                    The other @(_actionable.Count - _chosen.Count) model(s) in the
+                                    table are left exactly as they are.
+                                </text>
+                            }
                         </MudText>
 
-                        @if (_plan.Conflicts.Count > 0)
+                        @* The planner allowed a destination because whatever sits
+                           in it was moving out in the same run. Untick that one
+                           and the folder is still occupied. Nothing is
+                           overwritten -- the executor will not -- but the two end
+                           up sharing a folder, which is not what either row
+                           said. *@
+                        @if (_needsVacating.Count > 0)
                         {
                             <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
-                                <strong>@_plan.Conflicts.Count file(s) cannot be placed</strong> and will
+                                <strong>@_needsVacating.Count unticked model(s) are sitting in a folder
+                                a ticked one wants.</strong> They were only free to use because this
+                                plan moved that model out too. Tick them as well, or those files end
+                                up sharing a folder.
+                                <ul class="mt-2">
+                                    @foreach (var blocker in _needsVacating.Take(20))
+                                    {
+                                        <li>
+                                            <MudText Typo="Typo.caption">
+                                                <strong>@blocker.ModelName</strong> still holds
+                                                <code>@blocker.From</code>
+                                            </MudText>
+                                        </li>
+                                    }
+                                </ul>
+                                <MudButton Size="Size.Small" Variant="Variant.Text" Class="mt-1"
+                                           OnClick="ChooseBlockers">
+                                    Tick those too
+                                </MudButton>
+                            </MudAlert>
+                        }
+
+                        @if (Chosen.Conflicts.Count > 0)
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                                <strong>@Chosen.Conflicts.Count file(s) cannot be placed</strong> and will
                                 stay where they are. Something different already claims the name each
                                 would land under.
                                 <MudExpansionPanels Elevation="0" Class="mt-2">
                                     <MudExpansionPanel Text="Show them">
-                                        @foreach (var conflict in _plan.Conflicts.Take(50))
+                                        @foreach (var conflict in Chosen.Conflicts.Take(50))
                                         {
                                             <MudText Typo="Typo.caption" Class="d-block"
                                                      Style="font-family:ui-monospace,monospace">
@@ -343,21 +432,21 @@ else
                             </MudAlert>
                         }
 
-                        @if (_plan.Deletions.Count > 0)
+                        @if (Chosen.Deletions.Count > 0)
                         {
                             <MudExpansionPanels Elevation="0" Class="mb-3">
-                                <MudExpansionPanel Text="@($"{_plan.Deletions.Count} file(s) will be deleted")">
-                                    @foreach (var deletion in _plan.Deletions.Take(50))
+                                <MudExpansionPanel Text="@($"{Chosen.Deletions.Count} file(s) will be deleted")">
+                                    @foreach (var deletion in Chosen.Deletions.Take(50))
                                     {
                                         <MudText Typo="Typo.caption" Class="d-block mud-text-secondary"
                                                  Style="font-family:ui-monospace,monospace">
                                             @deletion.Path
                                         </MudText>
                                     }
-                                    @if (_plan.Deletions.Count > 50)
+                                    @if (Chosen.Deletions.Count > 50)
                                     {
                                         <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                            ...and @(_plan.Deletions.Count - 50) more.
+                                            ...and @(Chosen.Deletions.Count - 50) more.
                                         </MudText>
                                     }
                                 </MudExpansionPanel>
@@ -392,8 +481,15 @@ else
                         {
                             <MudButton Variant="Variant.Filled" Color="Color.Warning"
                                        StartIcon="@Icons.Material.Filled.DriveFileMove"
-                                       OnClick="Apply">
-                                Move the files
+                                       Disabled="@Chosen.IsEmpty" OnClick="Apply">
+                                @* The count is on the button on purpose. It is
+                                   the last thing read before an irreversible
+                                   run, and "Move the files" reads the same
+                                   whether it means three models or three
+                                   thousand. *@
+                                @(_chosen.Count == _actionable.Count
+                                    ? "Move the files"
+                                    : $"Move {_chosen.Count} of {_actionable.Count} models")
                             </MudButton>
                             <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
                                 There is no undo. Back the library up first if you have not.
@@ -461,13 +557,96 @@ else
 
     private bool _wasRunning;
 
+    // Which models the button will actually touch.
+    //
+    // Everything is ticked to begin with, so the page behaves as it always did
+    // for anyone who just wants to run the whole plan; unticking is how you
+    // narrow it. Keyed on the model rather than the row because a pack that
+    // splits into ninety-eight destinations is still one decision -- half a
+    // broken-up pack is not something anyone sets out to ask for.
+    private readonly HashSet<int> _chosen = [];
+
+    /// <summary>Models the plan would do something to, so worth a checkbox.</summary>
+    private HashSet<int> _actionable = [];
+
+    /// <summary>
+    /// The plan narrowed to what is ticked. What Apply hands over, and what the
+    /// panel under the table describes.
+    /// </summary>
+    /// <remarks>
+    /// Held rather than recomputed on read: the apply panel asks it half a dozen
+    /// times a render, its counts each walk every move, and a render happens on
+    /// every tick of a box.
+    /// </remarks>
+    private OrganizePlan Chosen { get; set; } = new([]);
+
+    /// <summary>Unticked models whose folder a ticked one is being sent into.</summary>
+    private IReadOnlyList<PlannedMove> _needsVacating = [];
+
+    /// <summary>Header checkbox: on, off, or partway.</summary>
+    private bool? AllChosen =>
+        _chosen.Count == 0 ? false
+        : _chosen.Count == _actionable.Count ? true
+        : null;
+
     private void Apply()
     {
         if (_plan is null || _library is null) return;
 
-        if (!Organizer.TryStart(LibraryId, _plan))
+        // The narrowed plan, not the whole one. Narrowing only ever drops rows,
+        // so every move that runs is one that was on screen.
+        var plan = Chosen;
+        if (plan.IsEmpty) return;
+
+        if (!Organizer.TryStart(LibraryId, plan))
             Snackbar.Add("Already organizing this library.", Severity.Info);
     }
+
+    private void Choose(int modelId, bool wanted)
+    {
+        if (wanted) _chosen.Add(modelId); else _chosen.Remove(modelId);
+        OnChoiceChanged();
+    }
+
+    private void ChooseAll()
+    {
+        _chosen.UnionWith(_actionable);
+        OnChoiceChanged();
+    }
+
+    private void ChooseNone()
+    {
+        _chosen.Clear();
+        OnChoiceChanged();
+    }
+
+    /// <summary>
+    /// Tri-state header box. Partway counts as "not all", so the next click
+    /// fills the rest in rather than throwing the selection away.
+    /// </summary>
+    private void ChooseAllToggled(bool? value)
+    {
+        if (value is true or null) ChooseAll(); else ChooseNone();
+    }
+
+    private void ChooseBlockers()
+    {
+        foreach (var blocker in _needsVacating) _chosen.Add(blocker.ModelId);
+        OnChoiceChanged();
+    }
+
+    /// <summary>Redoes everything that hangs off the ticks. Called whenever they change.</summary>
+    private void OnChoiceChanged()
+    {
+        Chosen = (_plan ?? new OrganizePlan([])).For(_chosen);
+        _needsVacating = _plan?.VacancyNeeded(_chosen) ?? [];
+    }
+
+    /// <summary>Dims a row the plan describes but this run will not touch.</summary>
+    private string SkipClass(PlannedMove move) =>
+        _actionable.Contains(move.ModelId) && !_chosen.Contains(move.ModelId)
+            ? "organize-skipped"
+            : "";
 
     /// <summary>
     /// Re-renders on every status change, and replans once the run finishes:
@@ -529,7 +708,31 @@ else
             RenameFiles = _renameFiles,
         };
 
+        // Whether the whole plan was taken before this replan, so that stays
+        // true across a template tweak. Anyone who narrowed it down keeps their
+        // ticks instead, minus models the new plan has nothing to do to.
+        var wasEverything = _plan is null || _chosen.Count == _actionable.Count;
+
         _plan = await Planner.PlanAsync(LibraryId, rules);
+
+        _actionable =
+        [
+            .. _plan.Moves
+                .Where(m => m.Outcome == MoveOutcome.Move)
+                .Select(m => m.ModelId),
+        ];
+
+        if (wasEverything)
+        {
+            _chosen.Clear();
+            _chosen.UnionWith(_actionable);
+        }
+        else
+        {
+            _chosen.IntersectWith(_actionable);
+        }
+
+        OnChoiceChanged();
     }
 
     /// <summary>
