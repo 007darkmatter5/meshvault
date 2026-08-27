@@ -9,6 +9,8 @@
 @inject VariantReindexer Reindexer
 @inject GroupStore Groups
 @inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <PageTitle>@(_model?.Name ?? "Model") - MeshVault</PageTitle>
 
@@ -26,7 +28,11 @@
 else
 {
     <div class="d-flex align-center gap-3 mb-1">
-        <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Href="/browse" Size="Size.Small" />
+        @* Back to the browse you came from, filters and page intact, rather
+           than an unfiltered one. Falls back to plain /browse when this page
+           was opened directly and there is nothing to go back to. *@
+        <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small"
+                       OnClick="GoBack" title="Back" />
 
         @if (_editingName && _canEdit)
         {
@@ -484,6 +490,33 @@ else
         IsGroup
             ? _members.SelectMany(m => m.Tags).DistinctBy(t => t.Id).OrderBy(t => t.Name)
             : _model!.Tags;
+
+    /// <summary>
+    /// Steps back through the browser's own history, which is where the browse
+    /// filters live now that they are in the address bar.
+    /// </summary>
+    /// <remarks>
+    /// A link to /browse would land on an unfiltered grid and lose the search,
+    /// tags and page somebody had set. Guarded on there being history to step
+    /// through: opening a model page directly must not walk out of the app.
+    /// </remarks>
+    private async Task GoBack()
+    {
+        try
+        {
+            if (await JS.InvokeAsync<bool>("meshvaultCanGoBack"))
+            {
+                await JS.InvokeVoidAsync("history.back");
+                return;
+            }
+        }
+        catch (JSException)
+        {
+            // No script, or a circuit that has gone: fall through to the grid.
+        }
+
+        Nav.NavigateTo("/browse");
+    }
 
     private async Task Ungroup()
     {

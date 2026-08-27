@@ -8,6 +8,7 @@
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
 @inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
 
 <PageTitle>MeshVault</PageTitle>
 
@@ -301,7 +302,14 @@
 </MudGrid>
 
 @code {
-    // Set by links from the Designers and Collections pages.
+    // Every filter lives in the query string, and the address bar is the only
+    // record of what is selected.
+    //
+    // Held in fields alone they lasted until you looked at a model and came
+    // back, because arriving here rebuilds them from the URL and whatever was
+    // not written there was gone. Keeping them here instead means the browser's
+    // own Back works, a reload keeps its place, and a filtered view is a link
+    // somebody can send.
     [SupplyParameterFromQuery] public int? DesignerId { get; set; }
     [SupplyParameterFromQuery] public int? CollectionId { get; set; }
     [SupplyParameterFromQuery] public bool? MissingDesigner { get; set; }
@@ -310,6 +318,11 @@
     [SupplyParameterFromQuery] public int? LibraryId { get; set; }
     [SupplyParameterFromQuery] public bool? Unfiled { get; set; }
     [SupplyParameterFromQuery] public string? Site { get; set; }
+    [SupplyParameterFromQuery] public bool? Favorites { get; set; }
+    [SupplyParameterFromQuery(Name = "q")] public string? Query { get; set; }
+    [SupplyParameterFromQuery] public string? Tags { get; set; }
+    [SupplyParameterFromQuery] public string? Sort { get; set; }
+    [SupplyParameterFromQuery] public int? Page { get; set; }
 
     private List<Library> _libraries = [];
     private List<(Tag Tag, int Count)> _tagCounts = [];
@@ -351,19 +364,56 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        // Query-string filters win on navigation, so a link from Designers or
-        // Collections lands with that filter already applied.
+        // The URL says what is selected, so reading it back is the whole of it.
+        // Because Apply writes exactly what these fields hold, the round trip is
+        // a no-op and nothing is lost on the way through.
         _designerId = DesignerId;
         _collectionId = CollectionId;
         _missingDesigner = MissingDesigner ?? false;
         _missingSource = MissingSource ?? false;
         _missingCollection = MissingCollection ?? false;
-        _libraryId = LibraryId ?? _libraryId;
+        _libraryId = LibraryId;
         _unfiledOnly = Unfiled ?? false;
+        _favoritesOnly = Favorites ?? false;
         _site = Site;
-        _page = 1;
+        _search = Query ?? "";
+        _sort = Enum.TryParse<ModelSort>(Sort, ignoreCase: true, out var sort) ? sort : ModelSort.Name;
+        _page = Math.Max(1, Page ?? 1);
+
+        _selectedTags.Clear();
+        foreach (var tag in (Tags ?? "")
+                     .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            _selectedTags.Add(tag);
+
         await LoadAsync();
     }
+
+    /// <summary>
+    /// This page's address with everything currently selected written into it.
+    /// </summary>
+    /// <remarks>
+    /// A filter at its default is left out rather than spelled as its default,
+    /// so an unfiltered Browse is a clean "/browse" and a link carries only what
+    /// somebody actually chose.
+    /// </remarks>
+    private string FilterUri() => Nav.GetUriWithQueryParameters(
+        Nav.ToAbsoluteUri("/browse").ToString(),
+        new Dictionary<string, object?>
+        {
+            ["q"] = string.IsNullOrWhiteSpace(_search) ? null : _search,
+            ["libraryId"] = _libraryId,
+            ["designerId"] = _designerId,
+            ["collectionId"] = _collectionId,
+            ["site"] = _site,
+            ["tags"] = _selectedTags.Count == 0 ? null : string.Join(',', _selectedTags),
+            ["favorites"] = _favoritesOnly ? true : null,
+            ["missingDesigner"] = _missingDesigner ? true : null,
+            ["missingSource"] = _missingSource ? true : null,
+            ["missingCollection"] = _missingCollection ? true : null,
+            ["unfiled"] = _unfiledOnly ? true : null,
+            ["sort"] = _sort == ModelSort.Name ? null : _sort.ToString(),
+            ["page"] = _page > 1 ? _page : null,
+        });
 
     // Selecting and bulk editing ---------------------------------------------
 
@@ -516,11 +566,17 @@
     }
 
     /// <summary>Applies a filter change and resets to the first page.</summary>
-    private async Task Apply(Action change)
+    /// <summary>
+    /// Changes a filter and puts the result in the address bar, which is what
+    /// then loads it. Replaces rather than pushes: typing six letters into the
+    /// search box should not be six presses of Back to undo.
+    /// </summary>
+    private Task Apply(Action change)
     {
         change();
         _page = 1;
-        await LoadAsync();
+        Nav.NavigateTo(FilterUri(), replace: true);
+        return Task.CompletedTask;
     }
 
     private Task ToggleTag(string normalized) => Apply(() =>
@@ -537,10 +593,14 @@
         _selectedTags.Clear();
     });
 
-    private async Task GoToPage(int page)
+    /// <summary>
+    /// Paging does push a history entry: moving to page four is a place you
+    /// might reasonably want Back to return you from.
+    /// </summary>
+    private void GoToPage(int page)
     {
         _page = Math.Max(1, page);
-        await LoadAsync();
+        Nav.NavigateTo(FilterUri());
     }
 
     public void Dispose()

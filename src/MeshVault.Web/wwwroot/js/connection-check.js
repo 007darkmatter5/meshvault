@@ -17,6 +17,13 @@
         if (banner) banner.removeAttribute('data-visible');
     };
 
+    // Whether stepping back stays inside the app. A model page opened from a
+    // bookmark or a pasted link has nowhere of ours behind it, and going back
+    // from there would walk the visitor out to wherever they came from.
+    window.meshvaultCanGoBack = function () {
+        return window.history.length > 1;
+    };
+
     setTimeout(function () {
         if (window.__meshvaultInteractive) return;
 
