@@ -35,4 +35,16 @@ public static class SettingKeys
     /// signing in. Writing anything still needs an account.
     /// </summary>
     public const string PublicBrowsing = "access.publicBrowsing";
+
+    /// <summary>
+    /// Set once the starter variant vocabulary has been offered, so deleting
+    /// every definition sticks instead of being undone by the next restart.
+    /// </summary>
+    public const string VariantsSeeded = "variants.seeded";
+
+    /// <summary>
+    /// Fingerprint of the vocabulary the stored sculpt keys were produced with,
+    /// so a change to it can be noticed at startup.
+    /// </summary>
+    public const string VariantRulesVersion = "variants.rulesVersion";
 }

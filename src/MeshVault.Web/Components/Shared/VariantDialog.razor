@@ -1,0 +1,82 @@
+@* Add or edit one variant definition. *@
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Variant="Variant.Outlined" Immediate="true"
+                      Margin="Margin.Dense" AutoFocus="true" Class="mb-1"
+                      Placeholder="Supported" />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-4">
+            What this flavour is called wherever it is shown.
+        </MudText>
+
+        <MudTextField @bind-Value="_terms" Label="Matching words" Variant="Variant.Outlined"
+                      Immediate="true" Margin="Margin.Dense" Lines="3" Class="mb-1"
+                      Placeholder="supported, presupported, sup" />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-4">
+            Comma separated. Each matches whole words only, so "sup" finds
+            <code>UD-001-SUP-Wall</code> but not <code>Soup Dragon</code>. Write one with spaces
+            &mdash; "no logo" &mdash; and it also catches "no-logo" and "no_logo".
+        </MudText>
+
+        <MudNumericField @bind-Value="_rank" Label="Preview order" Variant="Variant.Outlined"
+                         Margin="Margin.Dense" Min="0" Max="999" Class="mb-1" />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-4">
+            Lowest wins. Previews open on the best-ranked export a sculpt has, and card images
+            are taken from it. Put supported copies last if you would rather not look at
+            scaffolding.
+        </MudText>
+
+        <MudSwitch T="bool" @bind-Value="_filler" Color="Color.Default"
+                   Label="Filler: strip these words but do not treat the file as a variant" />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block ml-11">
+            For noise in filenames &mdash; "STL", "files", "printable". The words are removed
+            from the sculpt's name and nothing is labelled.
+        </MudText>
+
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-4">@_error</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@(string.IsNullOrWhiteSpace(_name))" OnClick="Save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+
+    /// <summary>The definition being edited. A new one when its Id is zero.</summary>
+    [Parameter] public VariantDefinition Definition { get; set; } = new();
+
+    /// <summary>Shown when the store refuses the save, such as a name already in use.</summary>
+    [Parameter] public string? Error { get; set; }
+
+    private string _name = "";
+    private string _terms = "";
+    private int _rank;
+    private bool _filler;
+    private string? _error;
+
+    protected override void OnInitialized()
+    {
+        _name = Definition.Name;
+        _terms = Definition.MatchTerms;
+        _rank = Definition.PreviewRank;
+        _filler = Definition.IsFiller;
+        _error = Error;
+    }
+
+    private void Cancel() => Dialog.Cancel();
+
+    private void Save() => Dialog.Close(DialogResult.Ok(new VariantDefinition
+    {
+        Id = Definition.Id,
+        Name = _name.Trim(),
+        MatchTerms = _terms.Trim(),
+        PreviewRank = _rank,
+        IsFiller = _filler,
+    }));
+}

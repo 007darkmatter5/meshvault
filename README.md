@@ -7,6 +7,11 @@ you explicitly allow it — and adds search, tags, collections, designers, sourc
 per-model notes, rendered thumbnails, and an in-browser 3D preview you can rotate and
 snapshot as the card image.
 
+It also understands that a pack ships the same mini several times over. Supported,
+unsupported, hollowed and no-logo copies are recognised as **variants of one sculpt**
+rather than four unrelated files, so a folder of two hundred files reads as forty minis
+with four flavours each. When you are ready, it can lay the library out to match.
+
 Built with .NET 10, Blazor Server, MudBlazor, EF Core and SQLite. No GPU, no native
 imaging libraries, no external services.
 
@@ -80,9 +85,37 @@ the Libraries page.
    re-open self-signup there if you prefer.
 3. The library scans, then previews build in the background.
 
-If your models came out of [Manyfold](https://manyfold.app), hit **Import** on the
-Libraries page: it reads each `datapackage.json` and fills in real titles, tags,
-collections and designers. It never overwrites anything you have set by hand.
+---
+
+## Variants, the inbox, and organizing
+
+Three features that work together, all of them opt-in and none of them automatic.
+
+**Variants.** MeshVault reads filenames to work out which files are the same mini in a
+different flavour — `UD-001-SUP-Wall.stl` and `UD-001-Wall.stl` are one sculpt, supported
+and plain. The vocabulary is yours to edit under **Settings → Variants**: add whatever
+shorthand your creators use, and set the order that decides which copy a preview opens on.
+Get one wrong and you can correct it by hand on the model page; corrections are pinned and
+survive every later pass.
+
+Where a creator split those flavours across *separate folders*, **Regroup** on the
+Libraries page offers to show them as one entry without moving a thing.
+
+**The inbox.** Name a folder inside your library — `inbox` — under a library's settings.
+Drop new downloads there and they appear badged **Unfiled**, with a count on the Libraries
+page and a filter in Browse. Give them a designer and tags, and they stop being unfiled the
+moment you file them.
+
+**Organizing.** The **Organize** page works out where every model would go from a folder
+template such as `{designer}/{sculpt}`, and shows you the whole plan before anything
+happens. `{sculpt}` is the interesting one: it gives each mini its own folder, breaking a
+pack apart and gathering its flavours together in the same pass.
+
+Nothing moves until you press **Move the files**, and only when the library has
+*"Allow MeshVault to move and rename files"* turned on. The plan names every file it would
+delete — only ever a byte-for-byte copy of a file going to the same place, checked in full
+before it goes — and every file it cannot place. **There is no undo. Back up your library
+before the first run.**
 
 ---
 
@@ -181,7 +214,7 @@ dotnet test
 | `src/MeshVault.Core` | Domain model, filesystem scanning, mesh parsing, software renderer |
 | `src/MeshVault.Data` | EF Core, indexing, catalog queries, metadata import |
 | `src/MeshVault.Web` | Blazor UI, authentication, background workers, HTTP endpoints |
-| `tests/MeshVault.Tests` | 176 tests |
+| `tests/MeshVault.Tests` | 437 tests |
 
 ### How some of it works
 
@@ -197,6 +230,18 @@ container stays slim.
 (18 bytes per triangle against 50 in a binary STL), decimated by vertex clustering when
 a model exceeds the triangle budget. Payloads are cached, so opening a model is a local
 read rather than a trip to the library share.
+
+**Variants.** Filenames are read into a *sculpt* (which mini) and a *variant* (which
+flavour) against a vocabulary you curate. Detection only ever proposes: anything you set
+by hand is pinned and never revisited, and an empty vocabulary simply means every file
+stands on its own.
+
+**Organizing** plans first and applies second, always by hand. It moves files rather than
+folders, so a run stopped part way leaves every completed step both done and recorded; it
+rewrites the catalog as it goes, because a scan that found a moved folder would otherwise
+read it as one model deleted and another added, losing its tags. It will not overwrite: a
+same-name, same-length pair is hashed in full before either copy is removed, and one that
+turns out to differ is left alone.
 
 **Accounts.** The first is the administrator; registration then closes. Collections and
 favorites are per-user. The last administrator cannot be demoted, suspended or deleted.

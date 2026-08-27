@@ -97,5 +97,52 @@ public class LibrarySettingsTests : IDisposable
         Assert.Equal("Models", (await Reload()).Name);
     }
 
+    [Fact]
+    public async Task A_libraries_naming_convention_is_remembered()
+    {
+        // Settled on once, not retyped on every visit.
+        await _editor.SetOrganizeRulesAsync(1, new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{sculpt}",
+            FileTemplate = "{file} - {variant}",
+            RenameFiles = true,
+        });
+
+        var library = await Reload();
+
+        Assert.Equal("{designer}/{sculpt}", library.FolderTemplate);
+        Assert.Equal("{file} - {variant}", library.FileTemplate);
+        Assert.True(library.RenameFiles);
+    }
+
+    [Fact]
+    public async Task Each_library_keeps_its_own_convention()
+    {
+        // A staging disk and a finished collection are rarely laid out alike.
+        await using (var db = _factory.CreateDbContext())
+        {
+            db.Libraries.Add(new Library { Name = "Other", Path = "/other" });
+            await db.SaveChangesAsync();
+        }
+
+        await _editor.SetOrganizeRulesAsync(1, new OrganizeRules { FolderTemplate = "{designer}/{sculpt}" });
+        await _editor.SetOrganizeRulesAsync(2, new OrganizeRules { FolderTemplate = "{tag}/{model}" });
+
+        await using var check = _factory.CreateDbContext();
+        var libraries = await check.Libraries.OrderBy(l => l.Id).ToListAsync();
+
+        Assert.Equal("{designer}/{sculpt}", libraries[0].FolderTemplate);
+        Assert.Equal("{tag}/{model}", libraries[1].FolderTemplate);
+    }
+
+    [Fact]
+    public async Task A_library_that_has_never_been_organized_has_no_convention()
+    {
+        // Null rather than a default baked into the row, so the page can offer
+        // its own starting point without that looking like a saved choice.
+        Assert.Null((await Reload()).FolderTemplate);
+        Assert.False((await Reload()).RenameFiles);
+    }
+
     public void Dispose() => _conn.Dispose();
 }

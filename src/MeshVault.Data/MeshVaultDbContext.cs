@@ -15,6 +15,7 @@ public class MeshVaultDbContext(DbContextOptions<MeshVaultDbContext> options)
     public DbSet<Designer> Designers => Set<Designer>();
     public DbSet<ModelFavorite> Favorites => Set<ModelFavorite>();
     public DbSet<Setting> Settings => Set<Setting>();
+    public DbSet<VariantDefinition> VariantDefinitions => Set<VariantDefinition>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -30,6 +31,9 @@ public class MeshVaultDbContext(DbContextOptions<MeshVaultDbContext> options)
         b.Entity<ModelEntry>(e =>
         {
             e.HasIndex(x => new { x.LibraryId, x.RelativePath }).IsUnique();
+            e.HasIndex(x => new { x.LibraryId, x.GroupKey });
+            e.Property(x => x.GroupKey).HasMaxLength(400);
+            e.Property(x => x.GroupName).HasMaxLength(400);
             e.HasIndex(x => x.Name);
             e.HasIndex(x => x.SourceSite);
             e.Property(x => x.Name).HasMaxLength(400);
@@ -48,8 +52,20 @@ public class MeshVaultDbContext(DbContextOptions<MeshVaultDbContext> options)
         {
             e.HasIndex(x => new { x.ModelEntryId, x.RelativePath }).IsUnique();
             e.HasIndex(x => x.Sha256);
+            // Sculpts are grouped within one model, never across the library.
+            e.HasIndex(x => new { x.ModelEntryId, x.SculptKey });
+            e.Property(x => x.SculptKey).HasMaxLength(400);
+            e.Property(x => x.SculptName).HasMaxLength(400);
+            e.Property(x => x.VariantLabel).HasMaxLength(200);
             e.HasOne(x => x.ModelEntry).WithMany(x => x.Files)
                 .HasForeignKey(x => x.ModelEntryId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<VariantDefinition>(e =>
+        {
+            e.HasIndex(x => x.NormalizedName).IsUnique();
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.MatchTerms).HasMaxLength(1000);
         });
 
         b.Entity<Tag>(e =>

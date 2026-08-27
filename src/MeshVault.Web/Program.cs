@@ -107,12 +107,23 @@ builder.Services.AddScoped<MeshVault.Web.Services.UserAdmin>();
 // Owner of per-user data, resolved from the signed-in principal.
 builder.Services.AddScoped<ICurrentUser, SignedInUser>();
 builder.Services.AddScoped<LibraryIndexer>();
+
+// The vocabulary lives in the database and is curated; the classifier built
+// from it does not change under a scan that is already running.
+builder.Services.AddSingleton<VariantRules>();
+builder.Services.AddScoped(sp => sp.GetRequiredService<VariantRules>().Current);
+builder.Services.AddScoped<VariantReindexer>();
+builder.Services.AddScoped<VariantStore>();
+
 builder.Services.AddScoped<ModelCatalog>();
 builder.Services.AddScoped<ModelEditor>();
 builder.Services.AddScoped<OrganizePlanner>();
+builder.Services.AddScoped<GroupPlanner>();
+builder.Services.AddScoped<OrganizeExecutor>();
+builder.Services.AddScoped<GroupStore>();
 builder.Services.AddScoped<PaintStore>();
 builder.Services.AddSingleton<ScanService>();
-builder.Services.AddSingleton<ImportService>();
+builder.Services.AddSingleton<OrganizeService>();
 builder.Services.AddSingleton<ForegroundActivity>();
 
 // Diagnostics: a bounded tail of warnings and errors, and a count of live
@@ -127,7 +138,6 @@ builder.Logging.AddProvider(new RecentEventsLoggerProvider(recentEvents));
 builder.Services.AddSingleton<CircuitTracker>();
 builder.Services.AddSingleton<CircuitHandler>(sp => sp.GetRequiredService<CircuitTracker>());
 builder.Services.AddScoped<DiagnosticsReport>();
-builder.Services.AddScoped<DatapackageImporter>();
 builder.Services.AddScoped<SettingsStore>();
 builder.Services.AddHostedService<StartupIndexer>();
 

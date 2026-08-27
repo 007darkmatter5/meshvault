@@ -15,7 +15,11 @@ public record ScanProgress(int ModelsSeen, int FilesSeen, string? CurrentFolder)
 /// than rebuilding is what keeps user-owned data — tags, notes, favourites —
 /// attached to a model across rescans.
 /// </summary>
-public class LibraryIndexer(MeshVaultDbContext db, FolderScanner scanner, ILogger<LibraryIndexer> log)
+public class LibraryIndexer(
+    MeshVaultDbContext db,
+    FolderScanner scanner,
+    VariantClassifier variants,
+    ILogger<LibraryIndexer> log)
 {
     /// <summary>How often progress is reported. Walking a network share can run for
     /// minutes, and reporting per model would flood the UI.</summary>
@@ -89,7 +93,7 @@ public class LibraryIndexer(MeshVaultDbContext db, FolderScanner scanner, ILogge
     }
 
     /// <summary>Returns true when anything about the model's files changed.</summary>
-    private static bool MergeFiles(ModelEntry entry, ScannedModel scanned)
+    private bool MergeFiles(ModelEntry entry, ScannedModel scanned)
     {
         var changed = false;
         var byPath = entry.Files.ToDictionary(f => f.RelativePath);
@@ -98,6 +102,11 @@ public class LibraryIndexer(MeshVaultDbContext db, FolderScanner scanner, ILogge
         {
             if (byPath.TryGetValue(sf.RelativePath, out var file))
             {
+                // Reading a name costs nothing, so it is redone every scan. That
+                // is what carries an edit to the variant rules through to files
+                // whose bytes have not moved.
+                variants.Apply(entry, file);
+
                 if (file.SizeBytes == sf.SizeBytes && file.ModifiedUtc == sf.ModifiedUtc)
                     continue;
 
@@ -111,7 +120,7 @@ public class LibraryIndexer(MeshVaultDbContext db, FolderScanner scanner, ILogge
             }
             else
             {
-                entry.Files.Add(new ModelFile
+                var added = new ModelFile
                 {
                     RelativePath = sf.RelativePath,
                     FileName = sf.FileName,
@@ -120,7 +129,9 @@ public class LibraryIndexer(MeshVaultDbContext db, FolderScanner scanner, ILogge
                     SizeBytes = sf.SizeBytes,
                     ModifiedUtc = sf.ModifiedUtc,
                     ThumbnailState = InitialThumbnailState(sf.Extension),
-                });
+                };
+                variants.Apply(entry, added);
+                entry.Files.Add(added);
                 changed = true;
             }
         }

@@ -22,6 +22,12 @@ public static class PathTemplate
     [
         new("model", "The model's name", "Unnamed"),
         new("designer", "Who made it", "Unsorted"),
+
+        // The one token that changes how many folders come out of a model. A
+        // pack folder holding ninety-eight minis becomes ninety-eight folders,
+        // and four folders holding one mini between them become one. Both are
+        // the same rule: a sculpt gets a folder, and its exports live in it.
+        new("sculpt", "The mini, so a pack splits into one folder each", "Unsorted"),
         new("source", "Where it came from, such as MakerWorld", "Unknown source"),
         new("collection", "Your first collection containing it", "Unfiled"),
         new("tag", "Its first tag, alphabetically", "Untagged"),
@@ -35,6 +41,7 @@ public static class PathTemplate
         new("file", "The file's existing name, without its extension", "file"),
         new("index", "Its position among the model's files, from 1", "1"),
         new("kind", "Mesh, Cad, Image, Document and so on", "Other"),
+        new("variant", "Supported, Hollowed, No logo, or Plain", "Plain"),
     ];
 
     /// <summary>

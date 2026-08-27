@@ -1,6 +1,7 @@
 using MeshVault.Core.Imaging;
 using MeshVault.Core.Meshes;
 using MeshVault.Core.Models;
+using MeshVault.Core.Services;
 using MeshVault.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -60,8 +61,24 @@ public static class DatabaseInitializer
                 reclaimed / 1048576);
         }
 
+        await LoadVariantRulesAsync(sp);
         await RequeueThumbnailsIfRendererChangedAsync(sp, db, log);
     }
+
+    /// <summary>
+    /// Seeds the starter variant vocabulary on a new instance, puts whatever is
+    /// stored into force, and re-reads every indexed file against it when it —
+    /// or the classifier itself — has changed since the stored sculpt keys were
+    /// worked out.
+    /// </summary>
+    /// <remarks>
+    /// This is also the backfill: before variants existed no file had a sculpt
+    /// key, so the first start after the upgrade finds no recorded fingerprint
+    /// and classifies the whole library. It is string work over rows already in
+    /// SQLite, not a walk of the library share.
+    /// </remarks>
+    private static async Task LoadVariantRulesAsync(IServiceProvider sp) =>
+        await sp.GetRequiredService<VariantReindexer>().ApplyAsync();
 
     /// <summary>
     /// Queues every thumbnail for re-rendering when the renderer has changed in

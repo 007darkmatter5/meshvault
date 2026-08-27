@@ -16,6 +16,12 @@ public record ModelQuery
     public bool MissingDesigner { get; init; }
     /// <summary>Models with no source URL set.</summary>
     public bool MissingSource { get; init; }
+
+    /// <summary>Models in none of your collections, which file under the fallback.</summary>
+    public bool MissingCollection { get; init; }
+
+    /// <summary>Only what is still sitting in a library's inbox, waiting to be filed.</summary>
+    public bool UnfiledOnly { get; init; }
     public ModelSort Sort { get; init; } = ModelSort.Name;
     public int Page { get; init; } = 1;
     public int PageSize { get; init; } = 60;

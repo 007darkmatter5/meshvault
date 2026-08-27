@@ -81,6 +81,10 @@
                                Color="Color.Info" Label="No designer set" />
                     <MudSwitch T="bool" Value="_missingSource" ValueChanged="@(v => Apply(() => _missingSource = v))"
                                Color="Color.Info" Label="No source link" />
+                    <MudSwitch T="bool" Value="_missingCollection" ValueChanged="@(v => Apply(() => _missingCollection = v))"
+                               Color="Color.Info" Label="Not in a collection" />
+                    <MudSwitch T="bool" Value="_unfiledOnly" ValueChanged="@(v => Apply(() => _unfiledOnly = v))"
+                               Color="Color.Warning" Label="Unfiled: still in the inbox" />
                 </MudStack>
 
                 @if (_tagCounts.Count > 0)
@@ -260,6 +264,13 @@
                                     @model.Files.Count @(model.Files.Count == 1 ? "file" : "files")
                                 </MudText>
                                 <div class="d-flex flex-wrap gap-1 mt-2">
+                                    @if (Inbox.Holds(model.Library?.InboxPath, model.RelativePath))
+                                    {
+                                        <MudTooltip Text="Still in the inbox. Give it a designer, then organize it.">
+                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                                                     Color="Color.Warning" Class="ma-0">Unfiled</MudChip>
+                                        </MudTooltip>
+                                    }
                                     @if (model.SourceSite is not null)
                                     {
                                         <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
@@ -295,6 +306,9 @@
     [SupplyParameterFromQuery] public int? CollectionId { get; set; }
     [SupplyParameterFromQuery] public bool? MissingDesigner { get; set; }
     [SupplyParameterFromQuery] public bool? MissingSource { get; set; }
+    [SupplyParameterFromQuery] public bool? MissingCollection { get; set; }
+    [SupplyParameterFromQuery] public int? LibraryId { get; set; }
+    [SupplyParameterFromQuery] public bool? Unfiled { get; set; }
     [SupplyParameterFromQuery] public string? Site { get; set; }
 
     private List<Library> _libraries = [];
@@ -314,6 +328,8 @@
     private bool _favoritesOnly;
     private bool _missingDesigner;
     private bool _missingSource;
+    private bool _missingCollection;
+    private bool _unfiledOnly;
     private int _page = 1;
     private bool _loading;
 
@@ -323,7 +339,8 @@
     private bool HasFilters =>
         !string.IsNullOrEmpty(_search) || _libraryId is not null || _designerId is not null
         || _collectionId is not null || _site is not null || _favoritesOnly
-        || _missingDesigner || _missingSource || _selectedTags.Count > 0;
+        || _missingDesigner || _missingSource || _missingCollection || _unfiledOnly
+        || _selectedTags.Count > 0;
 
     protected override async Task OnInitializedAsync()
     {
@@ -340,6 +357,9 @@
         _collectionId = CollectionId;
         _missingDesigner = MissingDesigner ?? false;
         _missingSource = MissingSource ?? false;
+        _missingCollection = MissingCollection ?? false;
+        _libraryId = LibraryId ?? _libraryId;
+        _unfiledOnly = Unfiled ?? false;
         _site = Site;
         _page = 1;
         await LoadAsync();
@@ -373,6 +393,8 @@
         FavoritesOnly = _favoritesOnly,
         MissingDesigner = _missingDesigner,
         MissingSource = _missingSource,
+        MissingCollection = _missingCollection,
+        UnfiledOnly = _unfiledOnly,
         Sort = _sort,
         Page = _page,
     };
@@ -511,7 +533,7 @@
         _search = "";
         _libraryId = _designerId = _collectionId = null;
         _site = null;
-        _favoritesOnly = _missingDesigner = _missingSource = false;
+        _favoritesOnly = _missingDesigner = _missingSource = _missingCollection = _unfiledOnly = false;
         _selectedTags.Clear();
     });
 

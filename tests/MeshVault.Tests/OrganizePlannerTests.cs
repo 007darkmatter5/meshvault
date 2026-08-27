@@ -39,7 +39,7 @@ public class OrganizePlannerTests : IDisposable
         db.Libraries.Add(new Library { Name = "L", Path = "/l" });
         db.SaveChanges();
 
-        _planner = new OrganizePlanner(_factory, new FakeUser());
+        _planner = new OrganizePlanner(_factory, new FakeUser(), new VariantRules());
         _editor = new ModelEditor(_factory, new FakeUser());
     }
 

@@ -42,6 +42,15 @@
             </MudText>
         </MudPaper>
     </MudItem>
+    <MudItem xs="12" sm="4">
+        <MudPaper Outlined="true" Class="pa-4 settings-card" @onclick="@(() => Go("/settings/variants"))">
+            <MudIcon Icon="@Icons.Material.Filled.Layers" Color="Color.Primary" />
+            <MudText Typo="Typo.body1" Style="font-weight:600">Variants</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                The flavours a sculpt ships in, and the words that give them away.
+            </MudText>
+        </MudPaper>
+    </MudItem>
     @if (_paints)
     {
         <MudItem xs="12" sm="4">

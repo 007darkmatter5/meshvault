@@ -5,6 +5,9 @@
 @inject ModelEditor Editor
 @inject ISnackbar Snackbar
 @inject SettingsStore Settings
+@inject VariantStore Variants
+@inject VariantReindexer Reindexer
+@inject GroupStore Groups
 @inject AuthenticationStateProvider AuthState
 
 <PageTitle>@(_model?.Name ?? "Model") - MeshVault</PageTitle>
@@ -37,7 +40,7 @@ else
         }
         else
         {
-            <MudText Typo="Typo.h5" Class="flex-grow-1">@_model!.Name</MudText>
+            <MudText Typo="Typo.h5" Class="flex-grow-1">@Title</MudText>
             @if (_canEdit)
             {
                 <MudTooltip Text="Rename this model">
@@ -69,18 +72,37 @@ else
         }
     </div>
 
-    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-6" Style="font-family:ui-monospace,monospace">
-        @_model.Library?.Name / @_model.RelativePath
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1" Style="font-family:ui-monospace,monospace">
+        @_model.Library?.Name / @(IsGroup ? Paths.CommonParent(_members.Select(m => m.RelativePath)) : _model.RelativePath)
     </MudText>
+    @if (IsGroup)
+    {
+        <div class="d-flex align-center gap-2 mb-6">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" Class="ma-0">
+                @_members.Count folders
+            </MudChip>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                Exports of this sculpt kept in separate folders, shown together. Nothing was moved.
+            </MudText>
+            @if (_canEdit)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="Ungroup">Ungroup</MudButton>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="mb-6"></div>
+    }
 
     <MudGrid Spacing="4">
         <MudItem xs="12" md="7" lg="8">
-            @if (PreviewableFiles.Count > 0)
+            @if (_sculpts.Count > 0)
             {
                 <MudPaper Outlined="true" Class="pa-4 mb-4">
                     <MudText Typo="Typo.overline" Class="mud-text-secondary">Preview</MudText>
                     <div class="mt-2">
-                        <ModelViewer ModelId="_model.Id" Files="PreviewableFiles"
+                        <ModelViewer ModelId="_model.Id" Sculpts="_sculpts"
                                      SavedView="SavedView"
                                      CanEdit="_canEdit"
                                      OnSnapshotSaved="OnSnapshotSaved" @key="_model.Id" />
@@ -101,33 +123,113 @@ else
             <MudPaper Outlined="true" Class="pa-4">
                 <MudText Typo="Typo.overline" Class="mud-text-secondary">Files</MudText>
                 <MudTable Items="OrderedFiles" Dense="true" Hover="true" Elevation="0"
-                          Breakpoint="Breakpoint.Sm" Class="mt-2">
+                          Breakpoint="Breakpoint.Sm" Class="mt-2" GroupBy="FileGroups">
                     <HeaderContent>
                         <MudTh>Name</MudTh>
+                        <MudTh>Variant</MudTh>
                         <MudTh>Kind</MudTh>
                         <MudTh Style="text-align:right">Size</MudTh>
                         <MudTh>Modified</MudTh>
                     </HeaderContent>
+                    <GroupHeaderTemplate>
+                        <MudTh Class="mud-table-cell-custom-group" colspan="5">
+                            <MudText Typo="Typo.body2" Style="font-weight:600">@context.Key</MudText>
+                        </MudTh>
+                    </GroupHeaderTemplate>
                     <RowTemplate>
-                        <MudTd DataLabel="Name">
-                            <MudTooltip Text="@context.RelativePath">
-                                <MudText Typo="Typo.caption" Style="font-family:ui-monospace,monospace">
-                                    @context.FileName
+                        @if (_editingFileId == context.Id)
+                        {
+                            <MudTd DataLabel="Sculpt" colspan="5">
+                                <div class="d-flex flex-wrap align-center gap-2 py-2">
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary"
+                                             Style="font-family:ui-monospace,monospace;min-width:100%">
+                                        @context.FileName
+                                    </MudText>
+
+                                    @* Free text as well as a pick: a sculpt that
+                                       exists nowhere yet has no entry to choose. *@
+                                    <MudAutocomplete T="string" @bind-Value="_sculptDraft"
+                                                     Label="Sculpt" Dense="true" Margin="Margin.Dense"
+                                                     Variant="Variant.Outlined" CoerceValue="true"
+                                                     SearchFunc="SearchSculpts" Style="min-width:240px"
+                                                     ResetValueOnEmptyText="false" />
+
+                                    <MudSelect T="string" MultiSelection="true"
+                                               SelectedValues="_labelDraft"
+                                               SelectedValuesChanged="OnLabelsChanged"
+                                               Label="Variant" Dense="true" Margin="Margin.Dense"
+                                               Variant="Variant.Outlined" Style="min-width:220px"
+                                               MultiSelectionTextFunc="LabelSummary">
+                                        @foreach (var definition in _variants.Where(d => !d.IsFiller))
+                                        {
+                                            <MudSelectItem T="string" Value="@definition.Name">
+                                                @definition.Name
+                                            </MudSelectItem>
+                                        }
+                                    </MudSelect>
+
+                                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                               Disabled="@(_savingVariant || string.IsNullOrWhiteSpace(_sculptDraft))"
+                                               OnClick="@(() => SaveVariant(context))">Save</MudButton>
+                                    <MudButton Size="Size.Small" Variant="Variant.Text"
+                                               Disabled="_savingVariant"
+                                               OnClick="CancelVariantEdit">Cancel</MudButton>
+                                    @if (context.VariantSetByUser)
+                                    {
+                                        <MudButton Size="Size.Small" Variant="Variant.Text"
+                                                   Disabled="_savingVariant"
+                                                   OnClick="@(() => ResetVariant(context))">
+                                            Back to detected
+                                        </MudButton>
+                                    }
+                                </div>
+                            </MudTd>
+                        }
+                        else
+                        {
+                            <MudTd DataLabel="Name">
+                                <MudTooltip Text="@context.RelativePath">
+                                    <MudText Typo="Typo.caption" Style="font-family:ui-monospace,monospace">
+                                        @context.FileName
+                                    </MudText>
+                                </MudTooltip>
+                            </MudTd>
+                            <MudTd DataLabel="Variant">
+                                @if (context.SculptKey is not null)
+                                {
+                                    <div class="d-flex align-center gap-1">
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                            @(context.VariantLabel ?? "Plain")
+                                        </MudText>
+                                        @if (context.VariantSetByUser)
+                                        {
+                                            <MudTooltip Text="Set by hand. Rescans and vocabulary changes leave this alone.">
+                                                <MudIcon Icon="@Icons.Material.Filled.PushPin" Size="Size.Small"
+                                                         Class="mud-text-secondary" />
+                                            </MudTooltip>
+                                        }
+                                        @if (_canEdit)
+                                        {
+                                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                                           OnClick="@(() => StartVariantEdit(context))"
+                                                           title="Correct the sculpt or variant" />
+                                        }
+                                    </div>
+                                }
+                            </MudTd>
+                            <MudTd DataLabel="Kind">
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                         Color="@KindColor(context.Kind)" Class="ma-0">@context.Kind</MudChip>
+                            </MudTd>
+                            <MudTd DataLabel="Size" Style="text-align:right">
+                                <MudText Typo="Typo.caption">@Formats.Bytes(context.SizeBytes)</MudText>
+                            </MudTd>
+                            <MudTd DataLabel="Modified">
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                    @context.ModifiedUtc.LocalDateTime.ToString("d MMM yyyy")
                                 </MudText>
-                            </MudTooltip>
-                        </MudTd>
-                        <MudTd DataLabel="Kind">
-                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
-                                     Color="@KindColor(context.Kind)" Class="ma-0">@context.Kind</MudChip>
-                        </MudTd>
-                        <MudTd DataLabel="Size" Style="text-align:right">
-                            <MudText Typo="Typo.caption">@Formats.Bytes(context.SizeBytes)</MudText>
-                        </MudTd>
-                        <MudTd DataLabel="Modified">
-                            <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                @context.ModifiedUtc.LocalDateTime.ToString("d MMM yyyy")
-                            </MudText>
-                        </MudTd>
+                            </MudTd>
+                        }
                     </RowTemplate>
                 </MudTable>
             </MudPaper>
@@ -173,12 +275,12 @@ else
                     </MudSimpleTable>
                 </MudPaper>
 
-                @if (_model.Tags.Count > 0)
+                @if (AllTags.Any())
                 {
                     <MudPaper Outlined="true" Class="pa-4 mb-4">
                         <MudText Typo="Typo.overline" Class="mud-text-secondary">Tags</MudText>
                         <div class="d-flex flex-wrap gap-1 mt-2">
-                            @foreach (var tag in _model.Tags.OrderBy(t => t.Name))
+                            @foreach (var tag in AllTags)
                             {
                                 <MudChip T="string" Size="Size.Small" Class="ma-0" Color="Color.Primary"
                                          Variant="Variant.Outlined">@tag.Name</MudChip>
@@ -214,7 +316,7 @@ else
             <MudPaper Outlined="true" Class="pa-4 mb-4">
                 <MudText Typo="Typo.overline" Class="mud-text-secondary">Tags</MudText>
                 <div class="d-flex flex-wrap gap-1 my-2">
-                    @foreach (var tag in _model.Tags.OrderBy(t => t.Name))
+                    @foreach (var tag in AllTags)
                     {
                         var tagId = tag.Id;
                         <MudChip T="string" Size="Size.Small" Class="ma-0" Color="Color.Primary"
@@ -222,7 +324,7 @@ else
                             @tag.Name
                         </MudChip>
                     }
-                    @if (_model.Tags.Count == 0)
+                    @if (!AllTags.Any())
                     {
                         <MudText Typo="Typo.caption" Class="mud-text-secondary">No tags yet.</MudText>
                     }
@@ -278,7 +380,14 @@ else
                 <MudSimpleTable Dense="true" Elevation="0" Class="mt-2">
                     <tbody>
                         <tr><td class="mud-text-secondary">Size</td><td>@Formats.Bytes(_model.TotalBytes)</td></tr>
-                        <tr><td class="mud-text-secondary">Files</td><td>@_model.Files.Count</td></tr>
+                        <tr><td class="mud-text-secondary">Files</td><td>@AllFiles.Count()</td></tr>
+                        @if (SculptCount > 0)
+                        {
+                            <tr>
+                                <td class="mud-text-secondary">Sculpts</td>
+                                <td>@SculptCount</td>
+                            </tr>
+                        }
                         <tr><td class="mud-text-secondary">Added</td><td>@Formats.Ago(_model.AddedUtc)</td></tr>
                         <tr><td class="mud-text-secondary">Modified</td><td>@Formats.Ago(_model.FileModifiedUtc)</td></tr>
                     </tbody>
@@ -325,15 +434,164 @@ else
     private bool NotesChanged => _notes != _originalNotes;
     private bool SourceChanged => _sourceUrl != _originalSourceUrl || _license != _originalLicense;
 
+    /// <summary>
+    /// Meshes gather under the sculpt they are exports of, best export first;
+    /// everything else gathers under its kind. Ordering has to match the
+    /// grouping or a group's rows arrive in several pieces.
+    /// </summary>
     private IEnumerable<ModelFile> OrderedFiles =>
-        _model!.Files.OrderBy(f => f.Kind).ThenBy(f => f.FileName);
+        AllFiles
+            .OrderBy(f => f.Kind)
+            .ThenBy(f => FileGroupKey(f), StringComparer.OrdinalIgnoreCase)
+            .ThenBy(f => f.VariantRank)
+            .ThenBy(f => f.FileName, StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Files the browser viewer can actually render, largest first.</summary>
-    private List<ModelFile> PreviewableFiles =>
-        _model!.Files
-            .Where(f => MeshLoader.CanRead(f.Extension))
-            .OrderByDescending(f => f.SizeBytes)
-            .ToList();
+    private static readonly TableGroupDefinition<ModelFile> FileGroups = new()
+    {
+        Indentation = false,
+        Expandable = false,
+        Selector = FileGroupKey,
+    };
+
+    // Correcting a file's sculpt or variant ---------------------------------
+    //
+    // Detection reads names well but not perfectly: a creator's typo splits one
+    // sculpt across two headings, and no vocabulary can spell-check. This is the
+    // way out, and what it sets is pinned against every later pass.
+
+    // Variant groups --------------------------------------------------------
+    //
+    // A group is several folders holding the same sculpt. This page stands for
+    // all of them: the viewer, the file table and the tags read across every
+    // member, while the row being edited stays the primary. Empty for the great
+    // majority of models, which belong to no group.
+
+    private List<ModelEntry> _members = [];
+
+    private bool IsGroup => _members.Count > 1;
+
+    private string Title => IsGroup ? _model!.GroupName ?? _model.Name : _model!.Name;
+
+    /// <summary>Every file this page stands for, across the whole group.</summary>
+    private IEnumerable<ModelFile> AllFiles =>
+        IsGroup ? _members.SelectMany(m => m.Files) : _model!.Files;
+
+    /// <summary>
+    /// Tags on any member. They fan out on write, so this only differs from one
+    /// member's tags for a group whose folders were tagged before it existed.
+    /// </summary>
+    private IEnumerable<Tag> AllTags =>
+        IsGroup
+            ? _members.SelectMany(m => m.Tags).DistinctBy(t => t.Id).OrderBy(t => t.Name)
+            : _model!.Tags;
+
+    private async Task Ungroup()
+    {
+        await Groups.UngroupAsync(_model!.LibraryId, _model.GroupKey!);
+        await LoadAsync();
+        Snackbar.Add("Ungrouped. Each folder stands on its own again.", Severity.Success);
+    }
+
+    private List<VariantDefinition> _variants = [];
+    private int _editingFileId;
+    private string _sculptDraft = "";
+    private IReadOnlyCollection<string> _labelDraft = [];
+    private bool _savingVariant;
+
+    private void StartVariantEdit(ModelFile file)
+    {
+        _editingFileId = file.Id;
+        _sculptDraft = file.SculptName ?? Path.GetFileNameWithoutExtension(file.FileName);
+        _labelDraft = file.VariantLabel?
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            ?? [];
+    }
+
+    private void CancelVariantEdit() => _editingFileId = 0;
+
+    private void OnLabelsChanged(IReadOnlyCollection<string> picked) => _labelDraft = picked;
+
+    /// <summary>What the closed variant picker reads. No labels means the plain export.</summary>
+    private static string LabelSummary(IReadOnlyList<string> picked) =>
+        picked.Count == 0 ? "Plain" : string.Join(", ", picked);
+
+    /// <summary>
+    /// Sculpt names already in this model, so correcting a stray file is a pick
+    /// rather than an exercise in retyping a name exactly.
+    /// </summary>
+    private Task<IEnumerable<string>> SearchSculpts(string? value, CancellationToken ct)
+    {
+        var names = AllFiles
+            .Select(f => f.SculptName)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .Select(n => n!);
+
+        if (!string.IsNullOrWhiteSpace(value))
+            names = names.Where(n => n.Contains(value, StringComparison.OrdinalIgnoreCase));
+
+        return Task.FromResult(names.Take(20));
+    }
+
+    private async Task SaveVariant(ModelFile file)
+    {
+        _savingVariant = true;
+        try
+        {
+            var chosen = _variants.Where(d => _labelDraft.Contains(d.Name)).ToList();
+            await Editor.SetVariantAsync(file.Id, _sculptDraft, chosen);
+
+            _editingFileId = 0;
+            await LoadAsync();
+            Snackbar.Add($"{file.FileName} moved to {_sculptDraft}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not save that: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _savingVariant = false;
+        }
+    }
+
+    private async Task ResetVariant(ModelFile file)
+    {
+        _savingVariant = true;
+        try
+        {
+            await Editor.ResetVariantAsync(file.Id);
+            await Reindexer.ReclassifyModelAsync(_model!.Id);
+
+            _editingFileId = 0;
+            await LoadAsync();
+            Snackbar.Add($"{file.FileName} handed back to detection", Severity.Success);
+        }
+        finally
+        {
+            _savingVariant = false;
+        }
+    }
+
+    /// <summary>
+    /// How many distinct sculpts this model holds. "200 files" says nothing
+    /// about a pack that is forty minis exported five ways.
+    /// </summary>
+    private int SculptCount =>
+        AllFiles.Where(f => f.SculptKey is not null)
+            .Select(f => f.SculptKey)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+
+    private static string FileGroupKey(ModelFile file) =>
+        string.IsNullOrWhiteSpace(file.SculptName) ? file.Kind.ToString() : file.SculptName!;
+
+    /// <summary>
+    /// The sculpts the browser viewer can render, each holding every export of
+    /// it this model ships. Rebuilt by <see cref="LoadAsync"/>.
+    /// </summary>
+    private List<SculptGroup> _sculpts = [];
 
     /// <summary>
     /// The angle this model's card image was taken from, so the viewer opens on
@@ -400,8 +658,17 @@ else
         _card = await Catalog.GetAsync(Id);
         _allCollections = await Catalog.GetCollectionsAsync();
         _loaded = true;
+        _sculpts = [];
+        _members = [];
 
         if (_model is null) return;
+
+        // Worked out once per load rather than per render: a pack of two hundred
+        // files would regroup itself on every keystroke in the notes box.
+        _members = await Catalog.GetGroupMembersAsync(Id);
+        _sculpts = VariantGrouper.Group(AllFiles.Where(f => MeshLoader.CanRead(f.Extension)));
+        _variants = await Variants.GetAsync();
+
         _notes = _originalNotes = _model.Notes ?? "";
         _sourceUrl = _originalSourceUrl = _model.SourceUrl ?? "";
         _license = _originalLicense = _model.License ?? "";

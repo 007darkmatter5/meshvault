@@ -1,0 +1,172 @@
+@page "/libraries/{LibraryId:int}/regroup"
+@attribute [Authorize(Policy = Policies.Admin)]
+@rendermode InteractiveServer
+@inject GroupPlanner Planner
+@inject GroupStore Groups
+@inject ModelCatalog Catalog
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Regroup - MeshVault</PageTitle>
+
+<SettingsNav />
+
+<div class="d-flex align-center gap-3 mb-1">
+    <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Href="/libraries" Size="Size.Small" />
+    <MudText Typo="Typo.h5">Regroup @(_library?.Name ?? "library")</MudText>
+</div>
+
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-6" Style="max-width:860px">
+    Folders holding the same sculpt, proposed as one entry. Applying writes nothing to disk and
+    deletes nothing &mdash; each folder keeps its files and its own metadata, and Browse simply
+    lists the group once instead of once per folder. Undo it from any grouped model's page.
+</MudText>
+
+@if (!_loaded)
+{
+    <MudSkeleton Height="120px" />
+}
+else if (_plan is null || _plan.Pending.Count == 0)
+{
+    <MudAlert Severity="Severity.Success" Class="mb-4" Style="max-width:860px">
+        @if (_plan?.Proposals.Count > 0)
+        {
+            <text>
+                Everything that can be grouped already is &mdash; @_plan.Proposals.Count group(s).
+            </text>
+        }
+        else
+        {
+            <text>
+                Nothing to group. No two folders in this library hold the same sculpt, or the
+                folders that do hold more than one sculpt each and want splitting first.
+            </text>
+        }
+    </MudAlert>
+}
+else
+{
+    <MudPaper Outlined="true" Class="pa-4 mb-4" Style="max-width:860px">
+        <div class="d-flex align-center gap-3 flex-wrap">
+            <MudText Typo="Typo.body1">
+                <strong>@_plan.ModelsAffected</strong> models would become
+                <strong>@_selected.Count</strong> of @_plan.Pending.Count group(s).
+            </MudText>
+            <MudSpacer />
+            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="SelectAll">Select all</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="SelectNone">None</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Merge"
+                       Disabled="@(_busy || _selected.Count == 0)" OnClick="Apply">
+                @(_busy ? "Grouping..." : $"Group {_selected.Count} selected")
+            </MudButton>
+        </div>
+    </MudPaper>
+
+    <MudPaper Outlined="true" Style="max-width:860px">
+        @foreach (var proposal in _plan.Pending)
+        {
+            <div class="pa-4 regroup-row">
+                <div class="d-flex align-center gap-2">
+                    @{ var key = proposal.Key; }
+                    <MudCheckBox T="bool" Value="@_selected.Contains(key)"
+                                 ValueChanged="@((bool on) => Toggle(key, on))"
+                                 Dense="true" Class="ma-0" />
+                    <MudText Typo="Typo.body1" Style="font-weight:600">@proposal.Name</MudText>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">
+                        @proposal.Members.Count folders
+                    </MudChip>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary"
+                             Style="font-family:ui-monospace,monospace">
+                        @(proposal.CommonParent is "" ? "(library root)" : proposal.CommonParent)
+                    </MudText>
+                </div>
+
+                <div class="ml-10 mt-1">
+                    @foreach (var member in proposal.Members)
+                    {
+                        <div class="d-flex align-center gap-2">
+                            <MudText Typo="Typo.caption" Style="min-width:90px"
+                                     Class="@(member == proposal.Primary ? "" : "mud-text-secondary")">
+                                @member.Variant
+                            </MudText>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary"
+                                     Style="font-family:ui-monospace,monospace">
+                                @member.RelativePath
+                            </MudText>
+                            @if (member == proposal.Primary)
+                            {
+                                <MudTooltip Text="Represents the group in Browse, and supplies its name and card image">
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                                             Color="Color.Primary" Class="ma-0">shown</MudChip>
+                                </MudTooltip>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public int LibraryId { get; set; }
+
+    private Library? _library;
+    private GroupPlan? _plan;
+    private readonly HashSet<string> _selected = new(StringComparer.OrdinalIgnoreCase);
+    private bool _loaded;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _library = (await Catalog.GetLibrariesAsync()).FirstOrDefault(l => l.Id == LibraryId);
+        await ReplanAsync();
+        _loaded = true;
+    }
+
+    private async Task ReplanAsync()
+    {
+        _plan = await Planner.PlanAsync(LibraryId);
+
+        // Everything ticked to begin with. The page exists to be read before
+        // agreeing, not to make agreeing laborious.
+        SelectAll();
+    }
+
+    private void SelectAll()
+    {
+        _selected.Clear();
+        foreach (var proposal in _plan?.Pending ?? []) _selected.Add(proposal.Key);
+    }
+
+    private void SelectNone() => _selected.Clear();
+
+    private void Toggle(string key, bool on)
+    {
+        if (on) _selected.Add(key);
+        else _selected.Remove(key);
+    }
+
+    private async Task Apply()
+    {
+        _busy = true;
+        try
+        {
+            var chosen = _plan!.Pending.Where(p => _selected.Contains(p.Key)).ToList();
+            var grouped = await Groups.ApplyAsync(chosen);
+
+            await ReplanAsync();
+            Snackbar.Add(
+                $"{grouped:N0} models grouped into {chosen.Count:N0} entries", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not group: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

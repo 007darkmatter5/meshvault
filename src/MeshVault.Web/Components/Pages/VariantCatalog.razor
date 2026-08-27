@@ -1,0 +1,177 @@
+@page "/settings/variants"
+@attribute [Authorize(Policy = Policies.Admin)]
+@rendermode InteractiveServer
+@inject VariantStore Variants
+@inject VariantReindexer Reindexer
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Variants - MeshVault</PageTitle>
+
+<SettingsNav />
+
+<MudText Typo="Typo.h5" Class="mb-1">Variants</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-6" Style="max-width:820px">
+    Creators ship the same sculpt several times over &mdash; supported and unsupported, hollowed
+    and solid, with and without their logo &mdash; and say which is which in the filename. These
+    are the flavours this instance knows about, and the words that give each one away. Everything
+    left over after the words are stripped is the sculpt's name, so files that differ only by
+    flavour gather under one heading instead of looking like separate models.
+</MudText>
+
+<MudAlert Severity="Severity.Normal" Dense="true" Class="mb-6" Style="max-width:820px">
+    This is a suggestion, never the last word. A file whose sculpt or variant you set by hand on
+    its model page is left alone by all of this.
+</MudAlert>
+
+<MudPaper Outlined="true" Class="pa-5" Style="max-width:820px">
+    <div class="d-flex align-center justify-space-between mb-4">
+        <MudText Typo="Typo.h6">Definitions</MudText>
+        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => Edit(new VariantDefinition()))">
+            Add a variant
+        </MudButton>
+    </div>
+
+    @if (_definitions.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            No variants defined. Every file will stand on its own, which is how the app behaved
+            before this existed. Add one to start gathering exports of the same sculpt together.
+        </MudText>
+    }
+    else
+    {
+        <MudTable Items="_definitions" Dense="true" Hover="true" Elevation="0"
+                  Breakpoint="Breakpoint.Sm">
+            <HeaderContent>
+                <MudTh Style="width:1%">Order</MudTh>
+                <MudTh>Name</MudTh>
+                <MudTh>Matching words</MudTh>
+                <MudTh Style="width:1%"></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Order">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        @(context.IsFiller ? "—" : context.PreviewRank.ToString())
+                    </MudText>
+                </MudTd>
+                <MudTd DataLabel="Name">
+                    <div class="d-flex align-center gap-2">
+                        <MudText Typo="Typo.body2" Style="font-weight:600">@context.Name</MudText>
+                        @if (context.IsFiller)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                     Class="ma-0">filler</MudChip>
+                        }
+                    </div>
+                </MudTd>
+                <MudTd DataLabel="Matching words">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary"
+                             Style="font-family:ui-monospace,monospace">
+                        @context.MatchTerms
+                    </MudText>
+                </MudTd>
+                <MudTd>
+                    <div class="d-flex">
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                       OnClick="@(() => Edit(context))" title="Edit" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                       Color="Color.Error" OnClick="@(() => Delete(context))"
+                                       title="Remove" />
+                    </div>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
+
+<MudPaper Outlined="true" Class="pa-5 mt-4" Style="max-width:820px">
+    <MudText Typo="Typo.h6" Class="mb-2">Re-read the library</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
+        Runs automatically whenever you change a definition. Run it by hand if you have renamed
+        files on disk and rescanned. It reads names already in the database &mdash; the library
+        share is not touched and nothing is renamed.
+    </MudText>
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="_busy"
+               StartIcon="@Icons.Material.Filled.Refresh" OnClick="Rerun">
+        @(_busy ? "Re-reading..." : "Re-read now")
+    </MudButton>
+</MudPaper>
+
+@code {
+    private List<VariantDefinition> _definitions = [];
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync() => _definitions = await Variants.GetAsync();
+
+    private async Task Edit(VariantDefinition definition)
+    {
+        var isNew = definition.Id == 0;
+        var parameters = new DialogParameters<VariantDialog>
+        {
+            { x => x.Definition, definition },
+        };
+
+        var dialog = await Dialogs.ShowAsync<VariantDialog>(
+            isNew ? "Add a variant" : $"Edit {definition.Name}", parameters);
+
+        if ((await dialog.Result) is not { Canceled: false, Data: VariantDefinition edited }) return;
+
+        if (await Variants.SaveAsync(edited) is null)
+        {
+            Snackbar.Add($"There is already a variant called {edited.Name}.", Severity.Error);
+            return;
+        }
+
+        await LoadAsync();
+        await ReapplyAsync($"Saved {edited.Name}");
+    }
+
+    private async Task Delete(VariantDefinition definition)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync(
+            $"Remove {definition.Name}?",
+            "Files already labelled with it keep that label until the next re-read, which "
+            + "happens straight away. Anything you have set by hand is untouched.",
+            yesText: "Remove", noText: null, cancelText: "Cancel");
+
+        if (confirmed != true) return;
+
+        await Variants.DeleteAsync(definition.Id);
+        await LoadAsync();
+        await ReapplyAsync($"Removed {definition.Name}");
+    }
+
+    private Task Rerun() => ReapplyAsync("Re-read the library");
+
+    /// <summary>
+    /// Puts the edited vocabulary into force and reports what moved. Done here
+    /// rather than left to the next restart, because a change whose effect you
+    /// cannot see is indistinguishable from one that did not work.
+    /// </summary>
+    private async Task ReapplyAsync(string what)
+    {
+        _busy = true;
+        try
+        {
+            var result = await Reindexer.ApplyAsync();
+            Snackbar.Add(
+                result.Any
+                    ? $"{what}. {result.FilesReclassified:N0} file(s) regrouped, "
+                      + $"{result.CardsRepointed:N0} card image(s) moved."
+                    : $"{what}. Nothing was grouped differently.",
+                Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not re-read the library: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

@@ -1,4 +1,5 @@
 @inject ModelEditor Editor
+@inject DirectoryBrowser Browser
 
 <MudDialog>
     <TitleContent>
@@ -17,14 +18,45 @@
                           ReadOnly="true" Disabled="true" T="string"
                           HelperText="Remove and re-add the library to point it somewhere else." />
 
+            <MudTextField Value="InboxPath" ValueChanged="@((string v) => InboxChanged(v))" T="string"
+                          Label="Inbox folder" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Immediate="true" DebounceInterval="300" Placeholder="inbox"
+                          HelperText="A folder inside this library where new downloads land. Leave blank if you have none." />
+
+            @* Naming a folder does not conjure one, and a name with no folder
+               behind it would quietly mean nothing is ever unfiled. Say so, and
+               offer to make it rather than sending someone to Explorer. *@
+            @if (_inboxState == InboxState.Missing)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">
+                    <div class="d-flex align-center gap-3 flex-wrap">
+                        <span>
+                            There is no <code>@InboxPath</code> folder in this library yet, so nothing
+                            will ever show as unfiled.
+                        </span>
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning"
+                                   Disabled="_creating" OnClick="CreateInbox">
+                            @(_creating ? "Creating..." : "Create it")
+                        </MudButton>
+                    </div>
+                </MudAlert>
+            }
+            else if (_inboxState == InboxState.Present)
+            {
+                <MudAlert Severity="Severity.Success" Dense="true">
+                    Found <code>@InboxPath</code>. Drop new downloads in there.
+                </MudAlert>
+            }
+
             <MudSwitch @bind-Value="AllowOrganize" Color="Color.Warning"
                        Label="Allow MeshVault to move and rename files in this folder" />
 
             <MudAlert Severity="Severity.Info" Dense="true">
-                MeshVault indexes files where they are. Nothing writes into this folder today, so
-                this setting only records what you would permit. If the folder is mounted read-only
-                &mdash; the Unraid template mounts it that way by default &mdash; turning this on
-                still will not make it writable.
+                MeshVault indexes files where they are. Organizing cannot move anything yet, so this
+                setting records what you would permit rather than unlocking it. Creating the inbox
+                above is the one exception, and it only ever makes an empty folder. If the share is
+                mounted read-only &mdash; the Unraid template mounts it that way by default &mdash;
+                turning this on still will not make it writable.
             </MudAlert>
 
             @if (_error is not null)
@@ -47,8 +79,62 @@
     [Parameter] public string Name { get; set; } = "";
     [Parameter] public string Path { get; set; } = "";
     [Parameter] public bool AllowOrganize { get; set; }
+    [Parameter] public string InboxPath { get; set; } = "";
 
     private string? _error;
+
+    private enum InboxState { None, Present, Missing }
+
+    private InboxState _inboxState;
+    private bool _creating;
+
+    protected override void OnInitialized() => CheckInbox();
+
+    private void InboxChanged(string value)
+    {
+        InboxPath = value;
+        CheckInbox();
+    }
+
+    private void CheckInbox()
+    {
+        var inbox = Inbox.Normalize(InboxPath);
+        _inboxState = inbox.Length == 0
+            ? InboxState.None
+            : Browser.Exists(System.IO.Path.Combine(Path, inbox.Replace('/', System.IO.Path.DirectorySeparatorChar)))
+                ? InboxState.Present
+                : InboxState.Missing;
+    }
+
+    /// <summary>
+    /// Makes the folder. An empty directory inside a library the user named
+    /// themselves is not the sort of write that needs guarding — nothing is
+    /// moved, renamed or overwritten by it.
+    /// </summary>
+    private async Task CreateInbox()
+    {
+        _creating = true;
+        try
+        {
+            var inbox = Inbox.Normalize(InboxPath);
+            var full = System.IO.Path.Combine(
+                Path, inbox.Replace('/', System.IO.Path.DirectorySeparatorChar));
+
+            await Task.Run(() => Directory.CreateDirectory(full));
+            CheckInbox();
+
+            if (_inboxState != InboxState.Present)
+                _error = "Created it, but it is not readable back. Check the share is writable.";
+        }
+        catch (Exception ex)
+        {
+            _error = $"Could not create it: {ex.Message}";
+        }
+        finally
+        {
+            _creating = false;
+        }
+    }
 
     private async Task OnKeyDown(KeyboardEventArgs e)
     {
@@ -60,7 +146,7 @@
         _error = null;
         try
         {
-            await Editor.UpdateLibraryAsync(LibraryId, Name, AllowOrganize);
+            await Editor.UpdateLibraryAsync(LibraryId, Name, AllowOrganize, InboxPath);
             Dialog.Close(DialogResult.Ok(true));
         }
         catch (Exception ex)

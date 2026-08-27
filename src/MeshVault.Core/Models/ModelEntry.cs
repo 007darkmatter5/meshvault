@@ -24,6 +24,37 @@ public class ModelEntry
     public string? Description { get; set; }
     public string? Notes { get; set; }
 
+    // Variant groups ---------------------------------------------------------
+    //
+    // A creator who ships supported, unsupported, hollowed and no-logo copies
+    // of a set often puts each in its own folder, and a folder is a model. The
+    // same mini then appears four times, unrelated. Grouping says the four rows
+    // are one thing without moving a file or destroying a row: the folders stay
+    // exactly as they are, and each keeps its own metadata underneath.
+    //
+    // Written only by an approved regroup, never by a scan, so a rescan cannot
+    // undo a grouping the user agreed to.
+
+    /// <summary>
+    /// Sculpt this model is one export of, shared with the other members of its
+    /// group. Null for a model that stands on its own, which is most of them.
+    /// </summary>
+    public string? GroupKey { get; set; }
+
+    /// <summary>What the group is called. Seeded from the best-ranked member's name.</summary>
+    public string? GroupName { get; set; }
+
+    /// <summary>
+    /// Whether this member represents the group where one entry is wanted.
+    /// </summary>
+    /// <remarks>
+    /// Browse lists a model when it is ungrouped or primary, which is what turns
+    /// four cards into one. Exactly one member of a group carries it; the
+    /// regroup picks the best-ranked export, so the card shows the sculpt rather
+    /// than a thicket of supports.
+    /// </remarks>
+    public bool GroupPrimary { get; set; }
+
     // Provenance. Shared metadata: it describes the model, not the viewer.
     public string? SourceUrl { get; set; }
     /// <summary>Site name derived from <see cref="SourceUrl"/>, for badging and filtering.</summary>

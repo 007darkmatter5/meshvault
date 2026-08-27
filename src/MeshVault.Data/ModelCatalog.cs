@@ -49,6 +49,7 @@ public class ModelCatalog(IDbContextFactory<MeshVaultDbContext> factory, ICurren
             .Include(m => m.Tags)
             .Include(m => m.Files)
             .Include(m => m.Designer)
+            .Include(m => m.Library)
             .ToDictionaryAsync(m => m.Id, ct);
 
         var cards = items
@@ -84,7 +85,12 @@ public class ModelCatalog(IDbContextFactory<MeshVaultDbContext> factory, ICurren
     /// </summary>
     private static IQueryable<ModelEntry> Filtered(MeshVaultDbContext db, ModelQuery query, string userId)
     {
-        var models = db.Models.AsNoTracking().AsQueryable();
+        // One entry per group. A sculpt shipped supported, unsupported, hollowed
+        // and no-logo is four folders and so four rows, but it is one thing to
+        // browse; the primary member stands for the rest. Ungrouped models —
+        // most of them — are unaffected.
+        var models = db.Models.AsNoTracking()
+            .Where(m => m.GroupKey == null || m.GroupPrimary);
 
         if (query.LibraryId is { } libraryId)
             models = models.Where(m => m.LibraryId == libraryId);
@@ -103,6 +109,25 @@ public class ModelCatalog(IDbContextFactory<MeshVaultDbContext> factory, ICurren
 
         if (query.MissingSource)
             models = models.Where(m => m.SourceUrl == null);
+
+        // Yours, not anyone's. Collections belong to an account, so "in no
+        // collection" has to mean the asker's own — a model somebody else filed
+        // is still unfiled as far as this question goes.
+        if (query.MissingCollection)
+            models = models.Where(m => !m.Collections.Any(c => c.OwnerId == userId));
+
+        // Unfiled is a fact about where a model sits, not a flag on it, so it is
+        // asked of the path against its own library's inbox rather than stored.
+        //
+        // Lowered on both sides: the stored path keeps whatever case was typed,
+        // which need not be the case the folder actually has on disk.
+        if (query.UnfiledOnly)
+        {
+            models = models.Where(m =>
+                m.Library!.InboxPath != null
+                && (m.RelativePath.ToLower() == m.Library.InboxPath.ToLower()
+                    || m.RelativePath.ToLower().StartsWith(m.Library.InboxPath.ToLower() + "/")));
+        }
 
         if (query.FavoritesOnly)
             models = models.Where(m => m.Favorites.Any(f => f.UserId == userId));
@@ -148,6 +173,53 @@ public class ModelCatalog(IDbContextFactory<MeshVaultDbContext> factory, ICurren
             .AnyAsync(f => f.ModelEntryId == id && f.UserId == userId, ct);
 
         return new ModelCard(model, isFavorite);
+    }
+
+    /// <summary>
+    /// Every model sharing a group with this one, itself included, ordered best
+    /// export first. Empty when the model stands on its own.
+    /// </summary>
+    /// <remarks>
+    /// What lets one page stand for four folders. Returning empty rather than a
+    /// single-element list keeps "is this a group" a question the caller can ask
+    /// without comparing counts.
+    /// </remarks>
+    public async Task<List<ModelEntry>> GetGroupMembersAsync(int modelId, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+
+        var group = await db.Models.AsNoTracking()
+            .Where(m => m.Id == modelId)
+            .Select(m => new { m.LibraryId, m.GroupKey })
+            .FirstOrDefaultAsync(ct);
+
+        if (group?.GroupKey is null) return [];
+
+        var members = await db.Models.AsNoTracking()
+            .Include(m => m.Tags)
+            .Include(m => m.Files)
+            .Where(m => m.LibraryId == group.LibraryId && m.GroupKey == group.GroupKey)
+            .ToListAsync(ct);
+
+        return [.. members.OrderBy(m => m.Files.Count == 0 ? int.MaxValue : m.Files.Min(f => f.VariantRank))
+                          .ThenBy(m => m.Name, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    /// <summary>
+    /// How many models are still sitting in each library's inbox, keyed by
+    /// library id. Libraries with no inbox do not appear.
+    /// </summary>
+    public async Task<Dictionary<int, int>> GetUnfiledCountsAsync(CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+
+        return await db.Models.AsNoTracking()
+            .Where(m => m.Library!.InboxPath != null
+                && (m.RelativePath.ToLower() == m.Library.InboxPath.ToLower()
+                    || m.RelativePath.ToLower().StartsWith(m.Library.InboxPath.ToLower() + "/")))
+            .GroupBy(m => m.LibraryId)
+            .Select(g => new { LibraryId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.LibraryId, x => x.Count, ct);
     }
 
     public async Task<List<Library>> GetLibrariesAsync(CancellationToken ct = default)

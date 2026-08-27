@@ -1,8 +1,12 @@
 @page "/libraries/{LibraryId:int}/organize"
 @attribute [Authorize(Policy = Policies.Admin)]
 @rendermode InteractiveServer
+@implements IDisposable
 @inject ModelCatalog Catalog
 @inject OrganizePlanner Planner
+@inject ModelEditor Editor
+@inject OrganizeService Organizer
+@inject ISnackbar Snackbar
 
 <PageTitle>Organize - MeshVault</PageTitle>
 
@@ -11,8 +15,8 @@
     <MudText Typo="Typo.h5">Organize @(_library?.Name ?? "library")</MudText>
 </div>
 <MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
-    Work out where every model would go. This page only ever reads: nothing is moved, renamed
-    or deleted by anything on it.
+    Work out where every model would go, then apply it. Reading the plan changes nothing; only the
+    button at the bottom moves a file, and only when the library allows it.
 </MudText>
 
 @if (_library is null)
@@ -73,6 +77,38 @@ else
                             ends up loose at the root.
                         </MudText>
                     </div>
+
+                    @* Trying a template out costs nothing; keeping one is a
+                       button. Otherwise looking would overwrite. *@
+                    @if (ConventionChanged)
+                    {
+                        <div class="d-flex align-center gap-2 flex-wrap">
+                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.Save"
+                                       Disabled="@(!CanSaveConvention)" OnClick="SaveConvention">
+                                Save as default
+                            </MudButton>
+                            @if (_library?.FolderTemplate is not null)
+                            {
+                                <MudButton Size="Size.Small" Variant="Variant.Text"
+                                           OnClick="RevertConvention">Revert</MudButton>
+                            }
+                        </div>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            Just looking? Nothing is saved until you press it, and nothing is moved
+                            either way.
+                        </MudText>
+                    }
+                    else if (_library?.FolderTemplate is not null)
+                    {
+                        <div class="d-flex align-center gap-2">
+                            <MudIcon Icon="@Icons.Material.Filled.CloudDone" Size="Size.Small"
+                                     Color="Color.Success" />
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                This library's saved convention.
+                            </MudText>
+                        </div>
+                    }
                 </MudStack>
             </MudPaper>
         </MudItem>
@@ -98,10 +134,52 @@ else
                                   Icon="@Icons.Material.Filled.Warning" />
                     </MudItem>
                     <MudItem xs="6" sm="3">
-                        <StatCard Value="@_plan.Renames.ToString("N0")" Label="File renames"
-                                  Icon="@Icons.Material.Filled.DriveFileRenameOutline" />
+                        @* Deleting is the one thing here that cannot be undone,
+                           so it gets the same prominence as the rest rather
+                           than a footnote. *@
+                        <StatCard Value="@_plan.Deletions.Count.ToString("N0")" Label="Would delete"
+                                  Icon="@Icons.Material.Filled.DeleteForever" />
                     </MudItem>
                 </MudGrid>
+
+                @* A model with nothing for a token still files, quietly, into a
+                   folder called Unsorted or Unfiled. That is almost never what
+                   was meant, and it is invisible in a destination path that
+                   reads like any other. *@
+                @if (_plan.FallbackCounts.Count > 0)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-4">
+                        <strong>Some models have nothing for part of the template</strong>
+                        and would file under a placeholder:
+                        <ul class="mt-2">
+                            @foreach (var (token, count) in _plan.FallbackCounts)
+                            {
+                                <li>
+                                    <MudText Typo="Typo.caption">
+                                        <strong>@count</strong> with no <code>@token</code>
+                                        &rarr; <code>@Placeholder(token)</code>
+                                        @if (FilterFor(token) is { } filter)
+                                        {
+                                            <MudLink Href="@filter" Class="ml-2">find them</MudLink>
+                                        }
+                                    </MudText>
+                                </li>
+                            }
+                        </ul>
+                        Fill those in first and they will land where you meant, rather than in a
+                        second tree you have to merge later.
+                    </MudAlert>
+                }
+
+                @if (_plan.Deletions.Count > 0)
+                {
+                    <MudAlert Severity="Severity.Error" Dense="true" Class="mb-4">
+                        <strong>@_plan.Deletions.Count file(s) would be deleted.</strong>
+                        Each one is a copy of a file going to the same place, and every copy is
+                        read through and compared byte for byte before it goes &mdash; anything
+                        that turns out to differ is left alone. They are marked in red below.
+                    </MudAlert>
+                }
 
                 @if (_plan.Colliding > 0)
                 {
@@ -124,6 +202,7 @@ else
                         </ToolBarContent>
                         <HeaderContent>
                             <MudTh>Model</MudTh>
+                            <MudTh>What happens</MudTh>
                             <MudTh>Now</MudTh>
                             <MudTh>Would become</MudTh>
                         </HeaderContent>
@@ -132,12 +211,54 @@ else
                                 <MudLink Href="@($"/model/{context.ModelId}")">
                                     <MudText Typo="Typo.caption">@context.ModelName</MudText>
                                 </MudLink>
-                                @if (context.Renames.Count > 0)
-                                {
-                                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
-                                        @context.Renames.Count file(s) renamed
-                                    </MudText>
+                            </MudTd>
+
+                            @* Deleting and skipping used to be announced only in
+                               a panel at the foot of the page, nowhere near the
+                               row it happened to. Anything that removes a file
+                               belongs where the eye already is. *@
+                            <MudTd DataLabel="What happens">
+                                @{
+                                    var moving = context.FileIds.Count
+                                        - context.Deletions.Count - context.Conflicts.Count;
                                 }
+                                <div class="d-flex flex-wrap gap-1">
+                                    @* Only when something actually moves. "0 moved"
+                                       beside a deletion reads as nothing happening
+                                       to a row that is about to lose a file. *@
+                                    @if (moving > 0)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                                 Class="ma-0">@moving moved</MudChip>
+                                    }
+                                    @if (context.Renames.Count > 0)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                                 Color="Color.Info" Class="ma-0">
+                                            @context.Renames.Count renamed
+                                        </MudChip>
+                                    }
+                                    @foreach (var deletion in context.Deletions)
+                                    {
+                                        <MudTooltip Text="@deletion.Reason">
+                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                                                     Color="Color.Error" Class="ma-0"
+                                                     Icon="@Icons.Material.Filled.DeleteForever">
+                                                @System.IO.Path.GetFileName(deletion.Path) deleted
+                                            </MudChip>
+                                        </MudTooltip>
+                                    }
+                                    @foreach (var conflict in context.Conflicts)
+                                    {
+                                        <MudTooltip Text="@conflict.Reason">
+                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                                                     Color="Color.Warning" Class="ma-0"
+                                                     Icon="@Icons.Material.Filled.Block">
+                                                @System.IO.Path.GetFileName(conflict.Path) stays
+                                            </MudChip>
+                                        </MudTooltip>
+                                    }
+                                </div>
                             </MudTd>
                             <MudTd DataLabel="Now">
                                 <MudText Typo="Typo.caption" Class="mud-text-secondary path-cell">
@@ -172,10 +293,140 @@ else
                     </MudTable>
                 </MudPaper>
 
-                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-4">
-                    Nothing above has happened. Applying a plan is not built yet: it will move real
-                    files, so it is being written separately, with every move recorded and undoable.
-                </MudAlert>
+                <MudPaper Outlined="true" Class="pa-4 mt-4">
+                    @if (_library?.AllowOrganize != true)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true">
+                            <strong>@_library?.Name</strong> is read-only, so nothing above can be
+                            applied. Turn on "Allow MeshVault to move and rename files" in its
+                            settings first.
+                        </MudAlert>
+                    }
+                    else if (_plan.Moving == 0 && _plan.Deletions.Count == 0)
+                    {
+                        <MudAlert Severity="Severity.Success" Dense="true">
+                            Everything is already where these rules want it.
+                        </MudAlert>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.h6" Class="mb-2">Apply this plan</MudText>
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
+                            Moves <strong>@_plan.Moving</strong> folder(s) worth of files inside
+                            <code>@_library.Path</code>@(_plan.Deletions.Count > 0
+                                ? $" and deletes {_plan.Deletions.Count} file(s) that would collide"
+                                : "").
+                            Files move; nothing is copied, and the catalog is rewritten to match as
+                            it goes, so your tags and notes follow their models.
+                        </MudText>
+
+                        @if (_plan.Conflicts.Count > 0)
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                                <strong>@_plan.Conflicts.Count file(s) cannot be placed</strong> and will
+                                stay where they are. Something different already claims the name each
+                                would land under.
+                                <MudExpansionPanels Elevation="0" Class="mt-2">
+                                    <MudExpansionPanel Text="Show them">
+                                        @foreach (var conflict in _plan.Conflicts.Take(50))
+                                        {
+                                            <MudText Typo="Typo.caption" Class="d-block"
+                                                     Style="font-family:ui-monospace,monospace">
+                                                @conflict.Path
+                                            </MudText>
+                                            <MudText Typo="Typo.caption" Class="d-block mud-text-secondary mb-2">
+                                                @conflict.Reason
+                                            </MudText>
+                                        }
+                                    </MudExpansionPanel>
+                                </MudExpansionPanels>
+                            </MudAlert>
+                        }
+
+                        @if (_plan.Deletions.Count > 0)
+                        {
+                            <MudExpansionPanels Elevation="0" Class="mb-3">
+                                <MudExpansionPanel Text="@($"{_plan.Deletions.Count} file(s) will be deleted")">
+                                    @foreach (var deletion in _plan.Deletions.Take(50))
+                                    {
+                                        <MudText Typo="Typo.caption" Class="d-block mud-text-secondary"
+                                                 Style="font-family:ui-monospace,monospace">
+                                            @deletion.Path
+                                        </MudText>
+                                    }
+                                    @if (_plan.Deletions.Count > 50)
+                                    {
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                            ...and @(_plan.Deletions.Count - 50) more.
+                                        </MudText>
+                                    }
+                                </MudExpansionPanel>
+                            </MudExpansionPanels>
+                        }
+
+                        @if (_applying)
+                        {
+                            <div class="d-flex align-center gap-3 mb-2">
+                                <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+                                <MudText Typo="Typo.body2">
+                                    @(_progress is { Total: > 0 }
+                                        ? $"{_progress.Done:N0} of {_progress.Total:N0} files"
+                                        : "Starting...")
+                                </MudText>
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary path-cell">
+                                    @_progress?.Current
+                                </MudText>
+                            </div>
+
+                            @if (_progress is { Total: > 0 })
+                            {
+                                <MudProgressLinear Color="Color.Warning"
+                                                   Value="@(100.0 * _progress.Done / _progress.Total)" />
+                            }
+
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+                                Running in the background. You can leave this page; it will keep going.
+                            </MudText>
+                        }
+                        else
+                        {
+                            <MudButton Variant="Variant.Filled" Color="Color.Warning"
+                                       StartIcon="@Icons.Material.Filled.DriveFileMove"
+                                       OnClick="Apply">
+                                Move the files
+                            </MudButton>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+                                There is no undo. Back the library up first if you have not.
+                            </MudText>
+                        }
+                    }
+
+                    @if (_result is not null)
+                    {
+                        <MudAlert Severity="@(_result.Clean ? Severity.Success : Severity.Warning)"
+                                  Dense="true" Class="mt-3">
+                            @_result.FilesMoved file(s) moved into @_result.FoldersCreated new
+                            folder(s). @_result.ModelsCreated model(s) added,
+                            @_result.ModelsRemoved removed@(_result.FilesDeleted > 0
+                                ? $", {_result.FilesDeleted} file(s) deleted" : "").
+                            @if (!_result.Clean)
+                            {
+                                <ul class="mt-2">
+                                    @foreach (var problem in _result.Problems.Take(20))
+                                    {
+                                        <li><MudText Typo="Typo.caption">@problem</MudText></li>
+                                    }
+                                </ul>
+                                @if (_result.Problems.Count > 20)
+                                {
+                                    <MudText Typo="Typo.caption">
+                                        ...and @(_result.Problems.Count - 20) more.
+                                    </MudText>
+                                }
+                            }
+                        </MudAlert>
+                    }
+                </MudPaper>
             }
         </MudItem>
     </MudGrid>
@@ -186,18 +437,70 @@ else
 
     private Library? _library;
     private OrganizePlan? _plan;
-    private string _folderTemplate = "{designer}/{model}";
-    private string _fileTemplate = "{model} - {file}";
+    /// <summary>Where a library with no convention of its own starts.</summary>
+    private const string DefaultFolderTemplate = "{designer}/{model}";
+    private const string DefaultFileTemplate = "{model} - {file}";
+
+    private string _folderTemplate = DefaultFolderTemplate;
+    private string _fileTemplate = DefaultFileTemplate;
     private bool _renameFiles;
     private bool _onlyChanges = true;
     private List<string> _folderProblems = [];
     private List<string> _fileProblems = [];
 
+    // Applying runs on a background task rather than here. Several hundred file
+    // moves is minutes of blocking filesystem calls, and doing that on the
+    // circuit's own thread leaves this page unable to render the progress it is
+    // being handed — it sits still and reads as finished while the share is
+    // plainly still working.
+
+    private bool _applying => Organizer.IsRunning(LibraryId);
+    private OrganizeProgress? _progress => Organizer.GetStatus(LibraryId)?.Progress;
+    private OrganizeResult? _result => Organizer.GetStatus(LibraryId)?.Result;
+    private string? _applyMessage => Organizer.GetStatus(LibraryId)?.Message;
+
+    private bool _wasRunning;
+
+    private void Apply()
+    {
+        if (_plan is null || _library is null) return;
+
+        if (!Organizer.TryStart(LibraryId, _plan))
+            Snackbar.Add("Already organizing this library.", Severity.Info);
+    }
+
+    /// <summary>
+    /// Re-renders on every status change, and replans once the run finishes:
+    /// every path in the old plan has just changed, so leaving it up would
+    /// describe a library that no longer exists.
+    /// </summary>
+    private void OnOrganizeChanged() => InvokeAsync(async () =>
+    {
+        var running = Organizer.IsRunning(LibraryId);
+        var finished = _wasRunning && !running;
+        _wasRunning = running;
+
+        if (finished) await Replan();
+        StateHasChanged();
+    });
+
     protected override async Task OnInitializedAsync()
     {
+        Organizer.Changed += OnOrganizeChanged;
+        _wasRunning = Organizer.IsRunning(LibraryId);
         _library = (await Catalog.GetLibrariesAsync()).FirstOrDefault(l => l.Id == LibraryId);
-        if (_library is not null) await Replan();
+
+        // Whatever was settled on last time, rather than the built-in defaults.
+        if (_library is not null)
+        {
+            _folderTemplate = _library.FolderTemplate ?? _folderTemplate;
+            _fileTemplate = _library.FileTemplate ?? _fileTemplate;
+            _renameFiles = _library.RenameFiles;
+            await Replan();
+        }
     }
+
+    public void Dispose() => Organizer.Changed -= OnOrganizeChanged;
 
     private async Task OnRenameToggled(bool value)
     {
@@ -219,14 +522,91 @@ else
                 .ToList()
             : [];
 
-        _plan = await Planner.PlanAsync(LibraryId, new OrganizeRules
+        var rules = new OrganizeRules
         {
             FolderTemplate = _folderTemplate,
             FileTemplate = _fileTemplate,
             RenameFiles = _renameFiles,
-        });
+        };
+
+        _plan = await Planner.PlanAsync(LibraryId, rules);
     }
 
+    /// <summary>
+    /// Whether what is on screen differs from what this library has settled on.
+    /// </summary>
+    /// <remarks>
+    /// Saving is deliberate rather than automatic. Trying a template to see what
+    /// it would do is the main thing this page is for, and a preview that
+    /// quietly overwrote the convention — with no undo — would make exploring
+    /// it cost something.
+    /// </remarks>
+    private bool ConventionChanged =>
+        _folderTemplate != (_library?.FolderTemplate ?? "")
+        || (_renameFiles && _fileTemplate != (_library?.FileTemplate ?? ""))
+        || _renameFiles != (_library?.RenameFiles ?? false);
+
+    private bool CanSaveConvention =>
+        ConventionChanged
+        && _folderProblems.Count == 0
+        && _fileProblems.Count == 0
+        && !string.IsNullOrWhiteSpace(_folderTemplate);
+
+    private async Task SaveConvention()
+    {
+        var rules = new OrganizeRules
+        {
+            FolderTemplate = _folderTemplate,
+            FileTemplate = _fileTemplate,
+            RenameFiles = _renameFiles,
+        };
+
+        await Editor.SetOrganizeRulesAsync(LibraryId, rules);
+
+        // Refreshed rather than assumed, so the button goes quiet only because
+        // the stored value really did change.
+        _library = (await Catalog.GetLibrariesAsync()).FirstOrDefault(l => l.Id == LibraryId);
+        Snackbar.Add("Saved as this library's naming convention", Severity.Success);
+    }
+
+    private async Task RevertConvention()
+    {
+        _folderTemplate = _library?.FolderTemplate ?? DefaultFolderTemplate;
+        _fileTemplate = _library?.FileTemplate ?? DefaultFileTemplate;
+        _renameFiles = _library?.RenameFiles ?? false;
+        await Replan();
+    }
+
+    /// <summary>The folder name a token falls back to when a model has nothing for it.</summary>
+    private static string Placeholder(string token) =>
+        PathTemplate.ModelTokens.FirstOrDefault(t =>
+            string.Equals(t.Name, token, StringComparison.OrdinalIgnoreCase))?.Fallback ?? "";
+
+    /// <summary>
+    /// Where to go and fill the gap in, for the tokens Browse can filter on.
+    /// </summary>
+    /// <remarks>
+    /// Saying that twelve models have no collection is only half a sentence
+    /// without a way to reach those twelve. Tokens with no filter behind them
+    /// simply get no link rather than a dead one.
+    /// </remarks>
+    private string? FilterFor(string token) => token.ToLowerInvariant() switch
+    {
+        "designer" => $"/browse?libraryId={LibraryId}&missingDesigner=true",
+        "collection" => $"/browse?libraryId={LibraryId}&missingCollection=true",
+        "source" => $"/browse?libraryId={LibraryId}&missingSource=true",
+        _ => null,
+    };
+
+    /// <summary>
+    /// A row worth reading. Deletions and conflicts count as changes even on a
+    /// model that is otherwise staying put — hiding the row that removes a file
+    /// is exactly how a deletion goes unnoticed.
+    /// </summary>
     private bool Show(PlannedMove move) =>
-        !_onlyChanges || move.Outcome != MoveOutcome.AlreadyThere || move.Renames.Count > 0;
+        !_onlyChanges
+        || move.Outcome != MoveOutcome.AlreadyThere
+        || move.Renames.Count > 0
+        || move.Deletions.Count > 0
+        || move.Conflicts.Count > 0;
 }

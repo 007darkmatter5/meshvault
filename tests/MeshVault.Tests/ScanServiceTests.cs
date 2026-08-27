@@ -26,6 +26,7 @@ public class ScanServiceTests : IDisposable
         services.AddScoped(sp =>
             sp.GetRequiredService<IDbContextFactory<MeshVaultDbContext>>().CreateDbContext());
         services.AddSingleton<FolderScanner>();
+        services.AddSingleton<VariantClassifier>();
         services.AddScoped<LibraryIndexer>();
         _services = services.BuildServiceProvider();
 

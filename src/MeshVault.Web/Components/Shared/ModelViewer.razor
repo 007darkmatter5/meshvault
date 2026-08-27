@@ -17,15 +17,32 @@
     }
 
     <div class="viewer-toolbar">
-        @if (Files.Count > 1)
+        @if (Sculpts.Count > 1)
         {
-            <MudSelect T="int" Value="_fileId" ValueChanged="SelectFile" Dense="true"
+            @* Closed, a MudSelect shows its bound value — which here is the
+               normalised key. Without this the picker reads "ud 001 wall". *@
+            <MudSelect T="string" Value="_sculptKey" ValueChanged="SelectSculpt" Dense="true"
+                       ToStringFunc="NameOf"
                        Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:230px">
-                @foreach (var file in Files)
+                @foreach (var sculpt in Sculpts)
                 {
-                    <MudSelectItem T="int" Value="@file.Id">@file.FileName</MudSelectItem>
+                    <MudSelectItem T="string" Value="@sculpt.Key">@sculpt.Name</MudSelectItem>
                 }
             </MudSelect>
+        }
+
+        @if (Current is { HasVariants: true } current)
+        {
+            <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
+                @foreach (var variant in current.Variants)
+                {
+                    var id = variant.File.Id;
+                    <MudButton Color="@(id == _fileId ? Color.Primary : Color.Default)"
+                               OnClick="@(() => SelectFile(id))">
+                        @variant.Display
+                    </MudButton>
+                }
+            </MudButtonGroup>
         }
 
         <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
@@ -71,7 +88,13 @@
 
 @code {
     [Parameter, EditorRequired] public int ModelId { get; set; }
-    [Parameter, EditorRequired] public List<ModelFile> Files { get; set; } = [];
+
+    /// <summary>
+    /// The sculpts this model holds, each with every export of it. Two pickers
+    /// rather than one: a flat list of files makes six exports of one mini look
+    /// like six minis.
+    /// </summary>
+    [Parameter, EditorRequired] public List<SculptGroup> Sculpts { get; set; } = [];
     /// <summary>Raised after a snapshot is saved, so the page can refresh its card image.</summary>
     [Parameter] public EventCallback OnSnapshotSaved { get; set; }
 
@@ -89,6 +112,7 @@
 
     private ElementReference _canvas;
     private IJSObjectReference? _module;
+    private string? _sculptKey;
     private int _fileId;
     private int _triangles;
     private bool _decimated;
@@ -107,14 +131,27 @@
     /// <summary>Matches the server's viewer budget, for the "simplified" note.</summary>
     private const int ViewerTriangleBudget = 250_000;
 
+    /// <summary>The sculpt's name as written, given its normalised key.</summary>
+    private string NameOf(string? key) =>
+        Sculpts.FirstOrDefault(s => s.Key == key)?.Name ?? key ?? "";
+
+    /// <summary>The sculpt on show, or null before one has been chosen.</summary>
+    private SculptGroup? Current =>
+        Sculpts.FirstOrDefault(s => s.Key == _sculptKey) ?? Sculpts.FirstOrDefault();
+
     protected override void OnParametersSet()
     {
-        if (_fileId == 0 && Files.Count > 0) _fileId = Files[0].Id;
+        if (_fileId != 0 || Sculpts.Count == 0) return;
+
+        // Opens on the cleanest export rather than whichever file sorted first:
+        // a supported mesh is a thicket of scaffolding with a model inside it.
+        _sculptKey = Sculpts[0].Key;
+        _fileId = Sculpts[0].Preferred.Id;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender || Files.Count == 0) return;
+        if (!firstRender || Sculpts.Count == 0) return;
 
         _module = await JS.InvokeAsync<IJSObjectReference>(
             "import", "/js/model-viewer.js");
@@ -123,8 +160,22 @@
 
     private async Task SelectFile(int fileId)
     {
+        if (_fileId == fileId) return;
         _fileId = fileId;
         await LoadAsync();
+    }
+
+    /// <summary>
+    /// Switches sculpt, landing on its best export rather than the same variant
+    /// as before — the next sculpt may not have been exported that way at all.
+    /// </summary>
+    private async Task SelectSculpt(string key)
+    {
+        var sculpt = Sculpts.FirstOrDefault(s => s.Key == key);
+        if (sculpt is null) return;
+
+        _sculptKey = key;
+        await SelectFile(sculpt.Preferred.Id);
     }
 
     private async Task SetView(string which)

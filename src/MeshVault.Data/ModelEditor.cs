@@ -14,22 +14,32 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
         await using var db = await factory.CreateDbContextAsync(ct);
         var userId = user.UserId;
 
-        var existing = await db.Favorites
-            .FirstOrDefaultAsync(f => f.ModelEntryId == modelId && f.UserId == userId, ct);
+        // Favouriting a sculpt favourites every export of it: the starred card
+        // in Browse is the group, and a half-favourited group would show as
+        // starred or not depending on which member happened to be primary.
+        var ids = await GroupStore.MemberIdsAsync(db, modelId, ct);
 
-        if (existing is not null)
+        var existing = await db.Favorites
+            .Where(f => ids.Contains(f.ModelEntryId) && f.UserId == userId)
+            .ToListAsync(ct);
+
+        if (existing.Count > 0)
         {
-            db.Favorites.Remove(existing);
+            db.Favorites.RemoveRange(existing);
             await db.SaveChangesAsync(ct);
             return false;
         }
 
-        db.Favorites.Add(new ModelFavorite
+        foreach (var id in ids)
         {
-            ModelEntryId = modelId,
-            UserId = userId,
-            CreatedUtc = DateTimeOffset.UtcNow,
-        });
+            db.Favorites.Add(new ModelFavorite
+            {
+                ModelEntryId = id,
+                UserId = userId,
+                CreatedUtc = DateTimeOffset.UtcNow,
+            });
+        }
+
         await db.SaveChangesAsync(ct);
         return true;
     }
@@ -82,6 +92,53 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
         await db.SaveChangesAsync(ct);
     }
 
+    // Variants --------------------------------------------------------------
+
+    /// <summary>
+    /// Says by hand which sculpt a file is an export of, and which flavour.
+    /// </summary>
+    /// <remarks>
+    /// Marks the file as set by the user, so neither a rescan nor a change to
+    /// the variant vocabulary undoes it. This is the escape hatch for the cases
+    /// no vocabulary can reach: a creator's typo that splits one sculpt in two,
+    /// or a mini genuinely called "Hollow Knight" whose name got eaten.
+    ///
+    /// The sculpt key is normalised the same way the classifier does it, so a
+    /// file moved here lands in the same group as one that was detected.
+    /// </remarks>
+    public async Task SetVariantAsync(
+        int fileId, string sculptName, IEnumerable<VariantDefinition> labels,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(sculptName)) return;
+
+        var chosen = labels.OrderBy(d => d.PreviewRank).ToList();
+        var name = sculptName.Trim();
+        var key = VariantClassifier.NormalizeKey(name);
+        var label = chosen.Count == 0 ? null : string.Join(", ", chosen.Select(d => d.Name));
+        var rank = chosen.Sum(d => d.PreviewRank);
+
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.Files.Where(f => f.Id == fileId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(f => f.SculptKey, key)
+                .SetProperty(f => f.SculptName, name)
+                .SetProperty(f => f.VariantLabel, label)
+                .SetProperty(f => f.VariantRank, rank)
+                .SetProperty(f => f.VariantSetByUser, true), ct);
+    }
+
+    /// <summary>
+    /// Drops a hand-set sculpt and variant, handing the file back to detection.
+    /// Takes effect on the next pass, which the caller runs.
+    /// </summary>
+    public async Task ResetVariantAsync(int fileId, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.Files.Where(f => f.Id == fileId)
+            .ExecuteUpdateAsync(s => s.SetProperty(f => f.VariantSetByUser, false), ct);
+    }
+
     public async Task SetLicenseAsync(int modelId, string? license, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
@@ -128,16 +185,21 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
         var normalized = name.ToLowerInvariant();
 
         await using var db = await factory.CreateDbContextAsync(ct);
-        var model = await db.Models.Include(m => m.Tags).FirstOrDefaultAsync(m => m.Id == modelId, ct);
-        if (model is null) return null;
 
-        var already = model.Tags.FirstOrDefault(t => t.NormalizedName == normalized);
-        if (already is not null) return already;
+        // A tag describes the sculpt, not the export, so it lands on every
+        // folder the group covers rather than on whichever one was open.
+        var ids = await GroupStore.MemberIdsAsync(db, modelId, ct);
+        var models = await db.Models.Include(m => m.Tags)
+            .Where(m => ids.Contains(m.Id)).ToListAsync(ct);
+        if (models.Count == 0) return null;
 
         var tag = await db.Tags.FirstOrDefaultAsync(t => t.NormalizedName == normalized, ct)
             ?? new Tag { Name = name, NormalizedName = normalized };
 
-        model.Tags.Add(tag);
+        foreach (var model in models)
+            if (model.Tags.All(t => t.NormalizedName != normalized))
+                model.Tags.Add(tag);
+
         await db.SaveChangesAsync(ct);
         return tag;
     }
@@ -145,11 +207,20 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
     public async Task RemoveTagAsync(int modelId, int tagId, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        var model = await db.Models.Include(m => m.Tags).FirstOrDefaultAsync(m => m.Id == modelId, ct);
-        var tag = model?.Tags.FirstOrDefault(t => t.Id == tagId);
-        if (model is null || tag is null) return;
 
-        model.Tags.Remove(tag);
+        var ids = await GroupStore.MemberIdsAsync(db, modelId, ct);
+        var models = await db.Models.Include(m => m.Tags)
+            .Where(m => ids.Contains(m.Id)).ToListAsync(ct);
+
+        var removed = false;
+        foreach (var model in models)
+        {
+            if (model.Tags.FirstOrDefault(t => t.Id == tagId) is not { } tag) continue;
+            model.Tags.Remove(tag);
+            removed = true;
+        }
+
+        if (!removed) return;
         await db.SaveChangesAsync(ct);
 
         // Drop tags that no longer label anything, so the filter list stays clean.
@@ -343,23 +414,33 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
             .FirstOrDefaultAsync(c => c.Id == collectionId && c.OwnerId == userId, ct);
         if (collection is null) return;
 
-        var already = collection.Models.FirstOrDefault(m => m.Id == modelId);
+        // Whole group in or whole group out, for the same reason as favourites:
+        // the collection lists one card per group, so partial membership would
+        // show or hide it depending on which member is primary.
+        var ids = await GroupStore.MemberIdsAsync(db, modelId, ct);
+        var changed = false;
 
-        if (member && already is null)
+        if (member)
         {
-            var model = await db.Models.FirstOrDefaultAsync(m => m.Id == modelId, ct);
-            if (model is null) return;
-            collection.Models.Add(model);
-        }
-        else if (!member && already is not null)
-        {
-            collection.Models.Remove(already);
+            var missing = ids.Where(id => collection.Models.All(m => m.Id != id)).ToList();
+            if (missing.Count == 0) return;
+
+            foreach (var model in await db.Models.Where(m => missing.Contains(m.Id)).ToListAsync(ct))
+            {
+                collection.Models.Add(model);
+                changed = true;
+            }
         }
         else
         {
-            return;
+            foreach (var model in collection.Models.Where(m => ids.Contains(m.Id)).ToList())
+            {
+                collection.Models.Remove(model);
+                changed = true;
+            }
         }
 
+        if (!changed) return;
         await db.SaveChangesAsync(ct);
     }
 
@@ -600,7 +681,7 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
     /// would orphan the whole library rather than follow it.
     /// </summary>
     public async Task UpdateLibraryAsync(int libraryId, string name, bool allowOrganize,
-        CancellationToken ct = default)
+        string? inboxPath = null, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         var library = await db.Libraries.FirstOrDefaultAsync(l => l.Id == libraryId, ct);
@@ -610,7 +691,33 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
         // folder name exactly as adding one does.
         library.Name = string.IsNullOrWhiteSpace(name) ? Path.GetFileName(library.Path) : name.Trim();
         library.AllowOrganize = allowOrganize;
+
+        // Stored in the form paths are compared in, so "/Inbox/" and "inbox"
+        // are the same folder rather than one of them silently matching nothing.
+        var inbox = Inbox.Normalize(inboxPath);
+        library.InboxPath = inbox.Length == 0 ? null : inbox;
+
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Remembers how this library should be laid out, so the templates are
+    /// there next time rather than starting from the defaults again.
+    /// </summary>
+    /// <remarks>
+    /// Saving a preference is not applying it. Nothing moves here — the rules
+    /// only decide what the next plan proposes.
+    /// </remarks>
+    public async Task SetOrganizeRulesAsync(
+        int libraryId, OrganizeRules rules, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+
+        await db.Libraries.Where(l => l.Id == libraryId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(l => l.FolderTemplate, rules.FolderTemplate)
+                .SetProperty(l => l.FileTemplate, rules.FileTemplate)
+                .SetProperty(l => l.RenameFiles, rules.RenameFiles), ct);
     }
 
     public async Task RemoveLibraryAsync(int libraryId, CancellationToken ct = default)

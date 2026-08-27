@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 dotnet build                                  # whole solution
-dotnet test                                   # all 176 tests, ~4s
-dotnet run --project src/MeshVault.Web        # http://localhost:5099 in Development
+dotnet test                                   # all 437 tests, ~6s
+dotnet run --project src/MeshVault.Web        # http://localhost:5082 in Development
 
 # One class, or one test
 dotnet test --filter "FullyQualifiedName~MeshDecimatorTests"
@@ -42,7 +42,8 @@ three (it needs `Web` for the background services and Razor guard).
 - **`MeshVault.Core`** — no EF, no ASP.NET. Domain models, `FolderScanner`, mesh parsing
   (`Meshes/`), and the software renderer (`Imaging/`).
 - **`MeshVault.Data`** — `MeshVaultDbContext` (also the Identity store), the reconciling
-  `LibraryIndexer`, read-side `ModelCatalog`, write-side `ModelEditor`, `DatapackageImporter`.
+  `LibraryIndexer`, read-side `ModelCatalog`, write-side `ModelEditor`, the variant vocabulary
+  (`VariantStore`, `VariantReindexer`).
 - **`MeshVault.Web`** — Blazor Server UI, auth, HTTP endpoints, background workers.
 
 ### Render modes — read this before touching `App.razor` or `MainLayout.razor`
@@ -93,6 +94,65 @@ models of their own are absorbed into it. `LibraryIndexer` **reconciles** rather
 tags, notes, favorites and collections survive rescans — `LibraryIndexerTests` pins this. Editing a
 file clears its derived data (hash, triangle count, thumbnail state) so it regenerates.
 
+Reconciliation is keyed on `ModelEntry.RelativePath`. **Anything that moves a folder must rewrite
+that path in the same operation**, or the next scan reads the move as one model deleted and another
+added — taking its tags, notes, collections, favorites and grouping with it. This is why
+`OrganizeExecutor` writes to the database as it goes rather than leaving it to a rescan.
+
+### Variants, sculpts and groups
+
+Creators ship the same sculpt several times over — supported, unsupported, hollowed, no-logo — and
+say which is which in the filename or a containing folder. Three layers handle it, and they only
+ever *propose*:
+
+- `VariantClassifier` reads a file's name into a **sculpt key** (which mini) and a **variant label**
+  (which flavour), against a vocabulary of `VariantDefinition` rows the user curates under
+  Settings → Variants. Its `PreviewRank` decides which export a preview opens on and which supplies
+  a card image, so "supports look bad" is a number on a row rather than a rule in the code.
+- `VariantGrouper` gathers a model's files into sculpts for the viewer and file table.
+- `GroupPlanner`/`GroupStore` do the same one level up, linking *separate models* that hold the same
+  sculpt. `ModelEntry.GroupKey`/`GroupPrimary` are written only by an approved regroup, never by a
+  scan, and Browse lists `GroupKey IS NULL OR GroupPrimary` so a group shows once.
+
+`ModelFile.VariantSetByUser` and `ModelEntry.NameSetByUser` are the same bargain: the app proposes,
+the person decides, and the decision outlives the proposal. Never overwrite a row carrying one.
+
+`VariantClassifier.Version` plus a fingerprint of the definitions gates the startup recompute in
+`VariantReindexer` — bump it when a pass would now produce a different result, including derived
+things like which file a card image points at.
+
+### The inbox
+
+`Library.InboxPath` names a folder *inside* the library where downloads land. Being inside matters:
+filing is then a rename on one volume rather than a copy between two, and the model keeps its id.
+
+Nothing promotes a model out of it. A folder template never yields a path inside the inbox, so
+filing empties it as a side effect. `Inbox.Missing` blocks a model only for a **designer or tag** —
+the tokens whose fallback would be a lie. "Unfiled" standing in for a collection is simply true.
+
+### Organizing
+
+`OrganizePlanner` proposes; `OrganizeExecutor` applies; nothing else calls either. `AllowOrganize`
+is permission, not instruction, and is checked in the executor rather than only the page.
+
+`{sculpt}` in the folder template is the one token that changes how many folders come out of a
+model: a pack of ninety-eight breaks apart, and four folders holding one mini between them come
+together. Same rule, both directions.
+
+Rules the executor will not bend:
+
+- Files, never folders. A half-done folder move leaves nothing recorded; file by file, every step is
+  either done and written down or not attempted.
+- Never overwrite. Same name and same length is a *candidate* copy — both are hashed before either
+  goes, and one that differs is left where it is. Hashes are cached in `ModelFile.Sha256`, which
+  `LibraryIndexer` clears when bytes move, so a stored hash is current or absent, never stale.
+- Every file must end up inside its model's folder. A file blocked by a clash while its model moved
+  gets a row of its own at the folder it is actually in (`RehomeStrandedAsync`).
+
+It runs on a background task via `OrganizeService`, like scans. Doing several hundred blocking file
+moves on the circuit's thread leaves the page unable to render the progress it is being handed — it
+looks finished while the share is plainly still working.
+
 ### Mesh pipeline
 
 `StagedMeshFile` copies a mesh to local disk once before parsing. The renderer makes two passes
@@ -116,7 +176,7 @@ frames every model to fit, so a raw distance would put the camera inside a small
 
 ### Background work
 
-`ScanService`, `ImportService` and `ThumbnailService` all run off the request thread and raise a
+`ScanService`, `OrganizeService` and `ThumbnailService` all run off the request thread and raise a
 `Changed` event that pages subscribe to.
 
 - Clear "running" state **before** raising the completion event. Subscribers call `IsRunning()`
@@ -157,6 +217,12 @@ from `MeshVaultOptions`/environment. Do not conflate them.
   or sort after loading. `ModelSortTests` runs every sort the UI offers for exactly this reason.
 - **`Progress<T>` dispatches asynchronously.** Assertions on collected reports race the final
   report. Use `SyncProgress<T>` in tests; this caused a ~1-in-5 flake.
+- **SQLite has no `APPLY`**, so a correlated sub-select in a projection — "the best-ranked file of
+  each model" — throws at runtime rather than falling back. Read the two sets flat and join them in
+  memory; `GroupPlanner` does exactly that and says why.
+- **EF queries do not see uncommitted changes.** `OrganizeExecutor` saves a destination at a time, so
+  a file that moved moments ago has its new path in memory and its old one in the database. Ask the
+  change tracker before the database, or a lookup by path silently misses it.
 - **Razor does not warn about unresolved components** — it emits them as literal markup, so a
   removed MudBlazor component renders as dead HTML with no build error. `RazorComponentTests`
   reflects over the assembly to catch this. Generic components reflect as ``MudSelect`1``.

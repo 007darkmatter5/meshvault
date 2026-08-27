@@ -25,7 +25,7 @@ public class LibraryIndexerTests : IDisposable
         new DbContextOptionsBuilder<MeshVaultDbContext>().UseSqlite(_conn).Options);
 
     private LibraryIndexer NewIndexer(MeshVaultDbContext db) =>
-        new(db, new FolderScanner(), NullLogger<LibraryIndexer>.Instance);
+        new(db, new FolderScanner(), new VariantClassifier(), NullLogger<LibraryIndexer>.Instance);
 
     private void File_(string relative, string content = "x")
     {
@@ -164,6 +164,54 @@ public class LibraryIndexerTests : IDisposable
             (await db.Files.FirstAsync(f => f.Extension == ".stl")).ThumbnailState);
         Assert.Equal(ThumbnailState.NotApplicable,
             (await db.Files.FirstAsync(f => f.Extension == ".md")).ThumbnailState);
+    }
+
+    [Fact]
+    public async Task Indexing_gathers_a_folder_of_exports_into_sculpts()
+    {
+        // The shape a bought pack actually arrives in: one folder, every mini
+        // shipped twice, which used to read as four unrelated files.
+        File_("Dungeon/Tavern_supported.stl");
+        File_("Dungeon/Tavern_unsupported.stl");
+        File_("Dungeon/Goblin_supported.stl");
+        File_("Dungeon/Goblin_unsupported.stl");
+        File_("Dungeon/readme.md");
+
+        await using var db = NewDb();
+        await NewIndexer(db).IndexAsync(1);
+
+        var files = await db.Files.ToListAsync();
+        var sculpts = files.Where(f => f.SculptKey is not null)
+            .Select(f => f.SculptKey).Distinct().ToList();
+
+        Assert.Equal(2, sculpts.Count);
+        Assert.Contains("tavern", sculpts);
+        Assert.Contains("goblin", sculpts);
+
+        // The readme is not an export of anything.
+        Assert.Null(files.Single(f => f.Extension == ".md").SculptKey);
+
+        var tavern = files.Where(f => f.SculptKey == "tavern").ToList();
+        Assert.Equal(
+            ["Supported", "Unsupported"],
+            tavern.Select(f => f.VariantLabel).Order().ToList());
+    }
+
+    [Fact]
+    public async Task A_rescan_leaves_sculpt_grouping_alone()
+    {
+        File_("Dungeon/Tavern_supported.stl");
+        File_("Dungeon/Tavern_unsupported.stl");
+
+        await using (var first = NewDb())
+            await NewIndexer(first).IndexAsync(1);
+
+        await using var db = NewDb();
+        await NewIndexer(db).IndexAsync(1);
+
+        var files = await db.Files.ToListAsync();
+        Assert.Equal(2, files.Count);
+        Assert.All(files, f => Assert.Equal("tavern", f.SculptKey));
     }
 
     public void Dispose()

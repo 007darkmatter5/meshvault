@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using MeshVault.Core.Imaging;
 using MeshVault.Core.Meshes;
 using MeshVault.Core.Models;
+using MeshVault.Core.Services;
 using MeshVault.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -160,7 +161,8 @@ public class ThumbnailService(
                     f.Extension,
                     f.SizeBytes,
                     f.ModelEntry!.Library!.Path,
-                    f.RelativePath))
+                    f.RelativePath,
+                    f.VariantRank))
                 .ToListAsync(ct);
         }
 
@@ -210,7 +212,7 @@ public class ThumbnailService(
                 .OrderBy(f => f.SizeBytes)
                 .Select(f => new PendingFile(
                     f.Id, f.ModelEntryId, f.FileName, f.Extension, f.SizeBytes,
-                    f.ModelEntry!.Library!.Path, f.RelativePath))
+                    f.ModelEntry!.Library!.Path, f.RelativePath, f.VariantRank))
                 .ToListAsync(ct);
 
             // Filesystem check, so it cannot be done in the query.
@@ -306,19 +308,48 @@ public class ThumbnailService(
             await db.Files.Where(f => f.Id == file.FileId)
                 .ExecuteUpdateAsync(s => s.SetProperty(f => f.ThumbnailState, state), ct);
 
-            // First successful render becomes the model's card image.
-            if (state == ThumbnailState.Ready)
-            {
-                await db.Models
-                    .Where(m => m.Id == file.ModelEntryId && m.ThumbnailFileId == null)
-                    .ExecuteUpdateAsync(s => s.SetProperty(m => m.ThumbnailFileId, file.FileId), ct);
-            }
+            if (state == ThumbnailState.Ready) await ConsiderForCardAsync(db, file, ct);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             log.LogError(ex, "Could not record the thumbnail result for file {FileId}", file.FileId);
         }
+    }
+
+    /// <summary>
+    /// Makes this render the model's card image when it shows the model better
+    /// than what is already there.
+    /// </summary>
+    /// <remarks>
+    /// Taking the first successful render meant the card was decided by whichever
+    /// of a batch of 32 finished first. On a pack that ships supported and
+    /// unsupported copies of everything that is a coin toss between the sculpt
+    /// and a thicket of scaffolding — so the plainest export wins instead, and a
+    /// later one that is plainer still takes the card over.
+    /// </remarks>
+    private static async Task ConsiderForCardAsync(
+        MeshVaultDbContext db, PendingFile file, CancellationToken ct)
+    {
+        var current = await db.Models
+            .Where(m => m.Id == file.ModelEntryId)
+            .Select(m => new
+            {
+                m.ThumbnailFileId,
+                Rank = m.Files.Where(f => f.Id == m.ThumbnailFileId)
+                    .Select(f => (int?)f.VariantRank)
+                    .FirstOrDefault(),
+            })
+            .FirstOrDefaultAsync(ct);
+
+        if (current is null) return;
+        if (current.ThumbnailFileId == file.FileId) return;
+        if (current.ThumbnailFileId is not null && current.Rank <= file.VariantRank) return;
+
+        await db.Models
+            .Where(m => m.Id == file.ModelEntryId
+                     && m.ThumbnailFileId == current.ThumbnailFileId)
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.ThumbnailFileId, file.FileId), ct);
     }
 
     private void Notify()
@@ -332,5 +363,5 @@ public class ThumbnailService(
 
     private record PendingFile(
         int FileId, int ModelEntryId, string FileName, string Extension,
-        long SizeBytes, string LibraryPath, string RelativePath);
+        long SizeBytes, string LibraryPath, string RelativePath, int VariantRank);
 }

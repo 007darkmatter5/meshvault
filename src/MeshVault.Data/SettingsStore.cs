@@ -18,6 +18,16 @@ public class SettingsStore(IDbContextFactory<MeshVaultDbContext> factory)
         return value is null ? fallback : value == "1";
     }
 
+    public async Task<string?> GetStringAsync(string key, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+
+        return await db.Settings.AsNoTracking()
+            .Where(s => s.Key == key)
+            .Select(s => s.Value)
+            .FirstOrDefaultAsync(ct);
+    }
+
     public async Task<int> GetIntAsync(string key, int fallback = 0, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
