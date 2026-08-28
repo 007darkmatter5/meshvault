@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 dotnet build                                  # whole solution
-dotnet test                                   # all 484 tests, ~6s
+dotnet test                                   # all 486 tests, ~6s
 dotnet run --project src/MeshVault.Web        # http://localhost:5082 in Development
 
 # One class, or one test
@@ -148,6 +148,13 @@ Rules the executor will not bend:
   share — `CreateDirectory` sees the old spelling and does nothing, `File.Move` resolves both paths
   to the same file — and the database is left recording a folder that is not the one on disk, which
   the next scan reads as a delete plus an add.
+- Never overwrite — **except a file onto itself**. `File.Move(from, to)` asks the filesystem whether
+  the destination exists, and on a case-insensitive mount `alco.stl` exists whenever `Alco.stl`
+  does, so a case-only rename can never happen and reports a clash with itself. `MoveFile` counts
+  the directory entries matching case-insensitively: one means it *is* this file and `overwrite:
+  true` is safe, two means two files and it refuses. `MatchCaseOnDisk` hits the same wall without an
+  overwrite overload and goes via a staging name. **Windows renames case in place and hides all of
+  this** — it took the Linux container to surface it, so test case behaviour there.
 - Never overwrite. Same name and same length is a *candidate* copy — both are hashed before either
   goes, and one that differs is left where it is. Hashes are cached in `ModelFile.Sha256`, which
   `LibraryIndexer` clears when bytes move, so a stored hash is current or absent, never stale.

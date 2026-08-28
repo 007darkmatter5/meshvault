@@ -595,6 +595,55 @@ public class OrganizeExecutorTests : IDisposable
     }
 
 
+    [Fact]
+    public async Task A_case_only_file_rename_is_not_refused_as_a_clash_with_itself()
+    {
+        // The live failure was "The file '.../alco.stl' already exists" for a
+        // rename of Alco.stl to alco.stl -- a clash reported against the very
+        // file being renamed. Windows renames case in place and hides it; a
+        // case-insensitive mount under Linux does not.
+        await NewModel("Dungeon Blocks/Alco", "Alco.stl");
+
+        var plan = await _planner.PlanAsync(1, new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{model}",
+            RenameFiles = true,
+            FileTemplate = "{file}",
+            FileCase = NameCase.Kebab,
+        });
+
+        var result = await _executor.ApplyAsync(1, plan);
+
+        Assert.True(result.Clean, string.Join("; ", result.Problems));
+        Assert.DoesNotContain(result.Problems, p => p.Contains("already exists"));
+
+        var onDisk = Directory.GetFiles(Path.Combine(_root, "Dungeon Blocks", "Alco"))
+            .Select(Path.GetFileName).ToList();
+        Assert.Equal(["alco.stl"], onDisk);
+
+        await using var check = _factory.CreateDbContext();
+        Assert.Equal("alco.stl", (await check.Files.SingleAsync()).FileName);
+    }
+
+    [Fact]
+    public async Task Two_files_differing_only_by_case_are_still_a_real_clash()
+    {
+        // The safety the overwrite rests on: one entry means it is the file
+        // itself, two means two files and nothing may be overwritten.
+        var folder = Path.Combine(_root, "probe");
+        Directory.CreateDirectory(folder);
+        await File.WriteAllTextAsync(Path.Combine(folder, "a.stl"), "one");
+
+        var method = typeof(OrganizeExecutor).GetMethod(
+            "MoveFile", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        // Renaming onto itself is allowed, and keeps the bytes.
+        method!.Invoke(null, [Path.Combine(folder, "a.stl"), Path.Combine(folder, "A.stl")]);
+
+        Assert.Equal("one", await File.ReadAllTextAsync(Path.Combine(folder, "A.stl")));
+        Assert.Single(Directory.GetFiles(folder));
+    }
+
     public void Dispose()
     {
         _conn.Dispose();

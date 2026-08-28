@@ -233,7 +233,7 @@ public class OrganizeExecutor(
                     // one name and the disk another, which a case-sensitive
                     // share reads as a missing file.
                     var unchanged = string.Equals(from, to, StringComparison.Ordinal);
-                    if (!unchanged) File.Move(from, to);
+                    if (!unchanged) MoveFile(from, to);
 
                     file.RelativePath = $"{group.Key}/{name}";
                     file.FileName = name;
@@ -304,6 +304,50 @@ public class OrganizeExecutor(
             || (move.Outcome == MoveOutcome.AlreadyThere && move.Renames.Count > 0));
 
     /// <summary>
+    /// Moves a file, coping with a rename that only changes its case.
+    /// </summary>
+    /// <remarks>
+    /// <c>File.Move(from, to)</c> refuses a destination that already exists, and
+    /// it decides that by asking the filesystem. On a case-insensitive one —
+    /// an SMB mount, which is how most people reach a library — "alco.stl"
+    /// already exists whenever "Alco.stl" does, because it is the same file, so
+    /// the rename can never happen. It is not an error the caller can act on
+    /// either: the reported clash is with itself.
+    ///
+    /// Windows renames case in place and hides this, which is exactly why it
+    /// took a Linux container to show it.
+    ///
+    /// Deciding the same way as <see cref="MatchCaseOnDisk"/>: one directory
+    /// entry matching case-insensitively means this is the file itself, and
+    /// renaming it onto itself cannot lose anything, so overwrite is safe.
+    /// Two entries mean two files, which is a real clash and is left for the
+    /// caller to report.
+    /// </remarks>
+    private static void MoveFile(string from, string to)
+    {
+        if (!string.Equals(from, to, StringComparison.OrdinalIgnoreCase))
+        {
+            File.Move(from, to);
+            return;
+        }
+
+        var folder = Path.GetDirectoryName(to);
+        var leaf = Path.GetFileName(to);
+
+        var matches = folder is null
+            ? []
+            : Directory.GetFiles(folder)
+                .Where(f => string.Equals(
+                    Path.GetFileName(f), leaf, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+        if (matches.Count > 1)
+            throw new IOException($"{leaf} is already a separate file in that folder.");
+
+        File.Move(from, to, overwrite: true);
+    }
+
+    /// <summary>
     /// Respells folders that already exist under a different case, so the disk
     /// says what the plan says.
     /// </summary>
@@ -353,7 +397,21 @@ public class OrganizeExecutor(
             {
                 try
                 {
-                    Directory.Move(matches[0], wanted);
+                    try
+                    {
+                        Directory.Move(matches[0], wanted);
+                    }
+                    catch (IOException)
+                    {
+                        // The same trap as MoveFile, without an overwrite
+                        // overload to escape through: a case-insensitive
+                        // filesystem says the destination already exists,
+                        // because it is this very folder. Go via a name it
+                        // cannot confuse with either spelling.
+                        var staging = Path.Combine(current, segment + ".meshvault-case");
+                        Directory.Move(matches[0], staging);
+                        Directory.Move(staging, wanted);
+                    }
                 }
                 catch (Exception ex)
                 {
