@@ -5,33 +5,27 @@
     saying what, which is the one thing a plan is for. It matters more now that
     a casing convention can rewrite every name in the library at once: the whole
     reason to pick kebab-case is to see what kebab-case does to your files.
+
+    Every rename, not a sample. This used to show three and summarise the rest
+    as "renamed the same way" -- which is a promise the preview cannot keep, and
+    the exceptions are exactly what a person is reading for: the file that
+    numbers because two names collapsed, the companion that takes a different
+    variant. Applying is irreversible, so the row shows what would happen rather
+    than a representative slice of it.
 *@
 
 @if (Renames.Count > 0)
 {
     <div class="organize-renames mt-1">
-        @foreach (var rename in Renames.Take(Limit))
+        @foreach (var rename in Renames)
         {
             <span class="rename-from">@rename.From</span>
             <span class="rename-arrow">&rarr;</span>
             <span class="rename-to">@rename.To</span>
         }
     </div>
-
-    @* Every name in a ninety-eight-file pack would bury the row it belongs to.
-       A few is enough to see the shape of the rule; the exact list is the
-       file table on the model itself. *@
-    @if (Renames.Count > Limit)
-    {
-        <MudText Typo="Typo.caption" Class="mud-text-secondary">
-            ...and @(Renames.Count - Limit) more renamed the same way.
-        </MudText>
-    }
 }
 
 @code {
     [Parameter, EditorRequired] public IReadOnlyList<PlannedRename> Renames { get; set; } = [];
-
-    /// <summary>How many to spell out before summarising the rest.</summary>
-    [Parameter] public int Limit { get; set; } = 3;
 }
