@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 dotnet build                                  # whole solution
-dotnet test                                   # all 500 tests, ~6s
+dotnet test                                   # all 508 tests, ~6s
 dotnet run --project src/MeshVault.Web        # http://localhost:5082 in Development
 
 # One class, or one test
@@ -116,6 +116,13 @@ ever *propose*:
 
 `ModelFile.VariantSetByUser` and `ModelEntry.NameSetByUser` are the same bargain: the app proposes,
 the person decides, and the decision outlives the proposal. Never overwrite a row carrying one.
+
+A sculpt's display name is *derived from its file's name on every scan*, and the app renames files
+itself. Organizing under a case convention therefore used to relabel the library on the next scan —
+`UD 067 Hole Trap` coming back as `ud 067 hole trap`, read off a filename the app had rewritten.
+`VariantClassifier.Apply` now keeps the stored spelling when the new one differs by **case alone**;
+the key is lowercased regardless, so nothing groups differently. `SculptNameRestorer` repairs a
+library already caught, out of the `OrganizeStep.From` paths the undo record keeps anyway.
 
 `VariantClassifier.Version` plus a fingerprint of the definitions gates the startup recompute in
 `VariantReindexer` — bump it when a pass would now produce a different result, including derived

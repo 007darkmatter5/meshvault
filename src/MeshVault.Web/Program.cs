@@ -114,6 +114,7 @@ builder.Services.AddSingleton<VariantRules>();
 builder.Services.AddScoped(sp => sp.GetRequiredService<VariantRules>().Current);
 builder.Services.AddScoped<VariantReindexer>();
 builder.Services.AddScoped<VariantStore>();
+builder.Services.AddScoped<SculptNameRestorer>();
 
 builder.Services.AddScoped<ModelCatalog>();
 builder.Services.AddScoped<ModelEditor>();

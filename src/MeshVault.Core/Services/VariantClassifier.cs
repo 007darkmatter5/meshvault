@@ -158,6 +158,19 @@ public class VariantClassifier
             (key, name, label, rank) = (read.Key, read.DisplayName, read.Label, read.Rank);
         }
 
+        // A spelling that differs only in case is not new information, and the
+        // app rewrites filenames itself: organizing under a case convention
+        // turns "UD-067-Hole-Trap.stl" into "ud-067-hole-trap.stl", and the
+        // next scan would read the heading back off its own handiwork. The key
+        // is lowercased either way, so nothing groups differently -- the only
+        // thing at stake is the spelling shown, which came from whoever named
+        // the file and is not ours to quietly restyle.
+        if (name is not null && file.SculptKey == key
+            && string.Equals(file.SculptName, name, StringComparison.OrdinalIgnoreCase))
+        {
+            name = file.SculptName;
+        }
+
         if (file.SculptKey == key && file.SculptName == name
             && file.VariantLabel == label && file.VariantRank == rank)
             return false;

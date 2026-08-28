@@ -3,6 +3,7 @@
 @rendermode InteractiveServer
 @inject VariantStore Variants
 @inject VariantReindexer Reindexer
+@inject SculptNameRestorer Restorer
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
 
@@ -99,6 +100,22 @@
     </MudButton>
 </MudPaper>
 
+<MudPaper Outlined="true" Class="pa-5 mt-4" Style="max-width:820px">
+    <MudText Typo="Typo.h6" Class="mb-2">Restore original spelling</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
+        A sculpt's heading is read from its file's name, so organizing under a case convention
+        used to rewrite the heading along with the file &mdash; &ldquo;UD 067 Hole Trap&rdquo;
+        coming back as &ldquo;ud 067 hole trap&rdquo; after the next scan. That no longer
+        happens, but a library it already caught can be put right: every organize run recorded
+        the name each file arrived with. Only the capitals move. A heading that now says
+        something different is left alone, and so is anything you set by hand.
+    </MudText>
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="_busy"
+               StartIcon="@Icons.Material.Filled.History" OnClick="RestoreSpelling">
+        @(_busy ? "Restoring..." : "Restore spelling")
+    </MudButton>
+</MudPaper>
+
 @code {
     private List<VariantDefinition> _definitions = [];
     private bool _busy;
@@ -146,6 +163,33 @@
     }
 
     private Task Rerun() => ReapplyAsync("Re-read the library");
+
+    /// <summary>
+    /// Puts back sculpt spellings the app's own renaming took away. Reads the
+    /// organize history already in the database -- no file on the share is
+    /// opened, and nothing is renamed.
+    /// </summary>
+    private async Task RestoreSpelling()
+    {
+        _busy = true;
+        try
+        {
+            var result = await Restorer.RestoreAsync();
+            Snackbar.Add(
+                result.Any
+                    ? $"Restored the spelling of {result.Restored:N0} sculpt name(s)."
+                    : "Nothing to restore. Every sculpt already reads as its file was named.",
+                result.Any ? Severity.Success : Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not restore the spelling: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     /// <summary>
     /// Puts the edited vocabulary into force and reports what moved. Done here

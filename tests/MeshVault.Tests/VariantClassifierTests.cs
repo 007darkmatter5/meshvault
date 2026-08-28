@@ -253,4 +253,55 @@ public class VariantClassifierTests
         Assert.False(_classifier.Apply(entry, file));
         Assert.Equal("ud 003 wall skulls 2", file.SculptKey);
     }
+
+    [Fact]
+    public void Renaming_a_file_to_another_case_does_not_restyle_its_sculpt()
+    {
+        // The sequence that quietly relabelled a whole library: organize under
+        // a case convention, then rescan. The heading was read back off a file
+        // name the app had itself rewritten, so the capitals the creator chose
+        // survived exactly as long as the file that carried them.
+        var entry = new ModelEntry { RelativePath = "Dungeon", Name = "Dungeon" };
+        var file = new ModelFile
+        {
+            RelativePath = "Dungeon/UD-067-HOL-Hole Trap.stl",
+            FileName = "UD-067-HOL-Hole Trap.stl",
+            Kind = FileKind.Mesh,
+        };
+
+        Assert.True(_classifier.Apply(entry, file));
+        Assert.Equal("UD 067 Hole Trap", file.SculptName);
+
+        file.RelativePath = "Dungeon/ud-067-hol-hole-trap.stl";
+        file.FileName = "ud-067-hol-hole-trap.stl";
+
+        Assert.False(_classifier.Apply(entry, file));
+        Assert.Equal("UD 067 Hole Trap", file.SculptName);
+        Assert.Equal("ud 067 hole trap", file.SculptKey);
+    }
+
+    [Fact]
+    public void A_rename_that_says_something_new_still_takes_effect()
+    {
+        // The other half of the bargain. Holding the spelling must not turn
+        // into holding the name: a file actually renamed on the share is
+        // reporting a different sculpt, and detection is right to follow it.
+        var entry = new ModelEntry { RelativePath = "Dungeon", Name = "Dungeon" };
+        var file = new ModelFile
+        {
+            RelativePath = "Dungeon/Goblin.stl",
+            FileName = "Goblin.stl",
+            Kind = FileKind.Mesh,
+        };
+
+        Assert.True(_classifier.Apply(entry, file));
+        Assert.Equal("Goblin", file.SculptName);
+
+        file.RelativePath = "Dungeon/Goblin King.stl";
+        file.FileName = "Goblin King.stl";
+
+        Assert.True(_classifier.Apply(entry, file));
+        Assert.Equal("Goblin King", file.SculptName);
+        Assert.Equal("goblin king", file.SculptKey);
+    }
 }
