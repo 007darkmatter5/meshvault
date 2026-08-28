@@ -65,6 +65,12 @@ public class OrganizeExecutor(
         var problems = new List<string>();
         int moved = 0, created = 0, deleted = 0, added = 0, removed = 0;
 
+        // Written as the run goes, for the same reason the catalog is: a run
+        // that stops half way must leave a record of exactly the half that
+        // happened, or taking it back would move files that never moved.
+        var run = new OrganizeRun { LibraryId = library.Id, RanUtc = DateTimeOffset.UtcNow };
+        db.OrganizeRuns.Add(run);
+
         // One unit of work per destination folder, because that is what a
         // ModelEntry will stand for. A pack splitting into ninety-eight and four
         // folders merging into one are the same shape seen from here.
@@ -235,9 +241,28 @@ public class OrganizeExecutor(
                     var unchanged = string.Equals(from, to, StringComparison.Ordinal);
                     if (!unchanged) MoveFile(from, to);
 
+                    var was = file.RelativePath;
+                    var owned = file.ModelEntryId;
+
                     file.RelativePath = $"{group.Key}/{name}";
                     file.FileName = name;
                     file.ModelEntryId = owner.Model.Id;
+
+                    // Recorded even when the bytes did not move: a file handed
+                    // to a different model has still changed, and an undo that
+                    // left it with its new owner would have unpicked half a
+                    // merge.
+                    if (!unchanged || owned != owner.Model.Id)
+                    {
+                        run.Steps.Add(new OrganizeStep
+                        {
+                            FileId = file.Id,
+                            From = was,
+                            To = file.RelativePath,
+                            FromModelId = owned,
+                            ToModelCreated = owner.IsNew,
+                        });
+                    }
 
                     // Only what actually happened. A model already in place with
                     // two of its six files renamed did two things, and reporting
@@ -248,6 +273,16 @@ public class OrganizeExecutor(
                 {
                     problems.Add($"Could not move {file.RelativePath}: {ex.Message}");
                 }
+            }
+
+            if (!string.Equals(owner.Model.RelativePath, group.Key, StringComparison.Ordinal))
+            {
+                run.Steps.Add(new OrganizeStep
+                {
+                    ModelId = owner.Model.Id,
+                    From = owner.Model.RelativePath,
+                    To = group.Key,
+                });
             }
 
             owner.Model.RelativePath = group.Key;
@@ -263,6 +298,11 @@ public class OrganizeExecutor(
         removed = await RemoveEmptiedAsync(db, touchedSources, ct);
         await RefreshTotalsAsync(db, ct);
         PruneEmptyFolders(root, sourceFolders, problems);
+
+        // What an undo cannot give back, stored on the run so the page can say
+        // so before anyone presses it rather than after.
+        run.FilesDeleted = deleted;
+        run.ModelsRemoved = removed;
 
         library.LastScannedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);

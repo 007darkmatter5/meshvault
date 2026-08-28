@@ -689,6 +689,96 @@ public class OrganizeExecutorTests : IDisposable
             Assert.True(Exists(file.RelativePath), $"{file.RelativePath} is not on disk");
     }
 
+    [Fact]
+    public async Task A_rename_sweep_can_be_taken_back()
+    {
+        // The case worth having undo for: a template that turned out wrong,
+        // applied across a library, with the originals the only record of what
+        // the files were.
+        await NewModel("Dungeon Blocks/Wall", "UD-001-HOL-Wall.stl", "UD-001-SUP-Wall.stl");
+
+        var plan = await _planner.PlanAsync(1, new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{model}",
+            RenameFiles = true,
+            FileTemplate = "{model}",
+            FileCase = NameCase.Kebab,
+        });
+
+        var applied = await _executor.ApplyAsync(1, plan);
+        Assert.True(applied.Clean, string.Join("; ", applied.Problems));
+
+        var afterRun = Directory.GetFiles(Path.Combine(_root, "Dungeon Blocks", "Wall"))
+            .Select(Path.GetFileName).OrderBy(n => n).ToList();
+        Assert.Equal(["wall-2.stl", "wall.stl"], afterRun);
+
+        var undo = new OrganizeUndo(_factory, NullLogger<OrganizeUndo>.Instance);
+        var last = await undo.LastAsync(1);
+
+        Assert.NotNull(last);
+        Assert.True(last!.FullyReversible);
+
+        var result = await undo.UndoAsync(last.Id);
+        Assert.True(result.Clean, string.Join("; ", result.Problems));
+        Assert.Equal(2, result.FilesRestored);
+
+        var afterUndo = Directory.GetFiles(Path.Combine(_root, "Dungeon Blocks", "Wall"))
+            .Select(Path.GetFileName).OrderBy(n => n).ToList();
+        Assert.Equal(["UD-001-HOL-Wall.stl", "UD-001-SUP-Wall.stl"], afterUndo);
+
+        // And the catalog agrees, or the next scan would undo the undo.
+        await using var check = _factory.CreateDbContext();
+        foreach (var file in await check.Files.ToListAsync())
+            Assert.True(Exists(file.RelativePath), $"{file.RelativePath} is not on disk");
+    }
+
+    [Fact]
+    public async Task A_run_already_taken_back_cannot_be_taken_back_again()
+    {
+        await NewModel("inbox/wall", "Wall.stl");
+        var plan = await _planner.PlanAsync(1, new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{sculpt}",
+        });
+        await _executor.ApplyAsync(1, plan);
+
+        var undo = new OrganizeUndo(_factory, NullLogger<OrganizeUndo>.Instance);
+        var last = await undo.LastAsync(1);
+        await undo.UndoAsync(last!.Id);
+
+        Assert.Null(await undo.LastAsync(1));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => undo.UndoAsync(last.Id));
+    }
+
+    [Fact]
+    public async Task A_file_touched_since_the_run_is_left_alone()
+    {
+        // The record describes a library that no longer exists. Acting on it
+        // would be guessing on somebody's behalf.
+        await NewModel("Dungeon Blocks/Wall", "UD-001-Wall.stl");
+
+        var plan = await _planner.PlanAsync(1, new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{model}",
+            RenameFiles = true, FileTemplate = "{model}", FileCase = NameCase.Kebab,
+        });
+        await _executor.ApplyAsync(1, plan);
+
+        await using (var meddle = _factory.CreateDbContext())
+        {
+            var file = await meddle.Files.SingleAsync();
+            file.RelativePath = "Dungeon Blocks/Wall/somebody-else-moved-me.stl";
+            await meddle.SaveChangesAsync();
+        }
+
+        var undo = new OrganizeUndo(_factory, NullLogger<OrganizeUndo>.Instance);
+        var result = await undo.UndoAsync((await undo.LastAsync(1))!.Id);
+
+        Assert.Equal(0, result.FilesRestored);
+        Assert.Equal(1, result.Skipped);
+        Assert.Contains(result.Problems, p => p.Contains("changed since the run"));
+    }
+
     public void Dispose()
     {
         _conn.Dispose();

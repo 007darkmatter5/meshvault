@@ -6,6 +6,7 @@
 @inject OrganizePlanner Planner
 @inject ModelEditor Editor
 @inject OrganizeService Organizer
+@inject OrganizeUndo Undoer
 @inject ISnackbar Snackbar
 
 <PageTitle>Organize - MeshVault</PageTitle>
@@ -321,6 +322,57 @@ else
                         Each one is a copy of a file going to the same place, and every copy is
                         read through and compared byte for byte before it goes &mdash; anything
                         that turns out to differ is left alone. They are marked in red below.
+                    </MudAlert>
+                }
+
+                @* Nothing is lost to a number -- the file arrives, and the row
+                   shows the name it arrives under. But "-2" tells nobody which
+                   of the two is the supported cut, and by the time anyone
+                   wonders, the name that knew has gone. Said before the button
+                   rather than in a problem list after it. *@
+                @if (_plan.Numberings.Count > 0)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-4">
+                        <strong>
+                            @_plan.Numberings.Count file(s) would be numbered
+                        </strong>
+                        because the template gives them the same name as another file.
+                        @if (_plan.NumberingFixes.Count > 0)
+                        {
+                            <ul class="mt-2">
+                                @foreach (var (token, files) in _plan.NumberingFixes)
+                                {
+                                    <li>
+                                        <MudText Typo="Typo.caption">
+                                            <strong>@files</strong> of them differ by
+                                            <code>@("{" + token + "}")</code> —
+                                            <MudLink Typo="Typo.caption" OnClick="@(() => AddToken(token))">
+                                                add it to the file name
+                                            </MudLink>
+                                            and they will say which is which.
+                                        </MudText>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                        @if (_plan.Numberings.Any(n => n.Distinguisher is null))
+                        {
+                            <MudText Typo="Typo.caption" Class="d-block mt-1">
+                                The rest are alike in everything MeshVault knows about them, so a
+                                number is the only honest answer.
+                            </MudText>
+                        }
+                        <MudExpansionPanels Elevation="0" Class="mt-2">
+                            <MudExpansionPanel Text="Show them">
+                                @foreach (var numbering in _plan.Numberings)
+                                {
+                                    <MudText Typo="Typo.caption" Class="d-block"
+                                             Style="font-family:ui-monospace,monospace">
+                                        @numbering.Path &rarr; @numbering.Name
+                                    </MudText>
+                                }
+                            </MudExpansionPanel>
+                        </MudExpansionPanels>
                     </MudAlert>
                 }
 
@@ -667,8 +719,71 @@ else
                                     : $"Move {_chosen.Count} of {_actionable.Count} models")
                             </MudButton>
                             <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
-                                There is no undo. Back the library up first if you have not.
+                                Every file this moves is written down, so the run can be taken back
+                                afterwards. Back the library up anyway if you have not.
                             </MudText>
+                        }
+                    }
+
+                    @* Offered after the run rather than as a promise before it:
+                       what can be given back depends on what the run did, and
+                       that is only known once it has done it. *@
+                    @if (_lastRun is { } undoable && !_applying)
+                    {
+                        <MudDivider Class="my-4" />
+
+                        <MudText Typo="Typo.subtitle2" Class="mb-1">The last run</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+                            @Formats.Ago(undoable.RanUtc), moving @undoable.Steps.Count(s => s.FileId is not null)
+                            file(s).
+                            @if (undoable.FullyReversible)
+                            {
+                                <text>Every part of it can be put back.</text>
+                            }
+                            else
+                            {
+                                <text>
+                                    Files go back where they were, but
+                                    @(undoable.FilesDeleted > 0
+                                        ? $"{undoable.FilesDeleted} file(s) it deleted cannot return — each was proved identical to one that survived"
+                                        : "")@(undoable is { FilesDeleted: > 0, ModelsRemoved: > 0 } ? ", and " : "")@(undoable.ModelsRemoved > 0
+                                        ? $"{undoable.ModelsRemoved} model(s) folded into others cannot be unpicked — their tags and notes went with them"
+                                        : "").
+                                </text>
+                            }
+                        </MudText>
+
+                        @if (_undoing)
+                        {
+                            <div class="d-flex align-center gap-3">
+                                <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+                                <MudText Typo="Typo.body2">Putting files back...</MudText>
+                            </div>
+                        }
+                        else
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                                       StartIcon="@Icons.Material.Filled.Undo" OnClick="Undo">
+                                Take the last run back
+                            </MudButton>
+                        }
+
+                        @if (_undoResult is { } undone)
+                        {
+                            <MudAlert Severity="@(undone.Clean ? Severity.Success : Severity.Warning)"
+                                      Dense="true" Class="mt-3">
+                                @undone.FilesRestored file(s) put back@(undone.Skipped > 0
+                                    ? $", {undone.Skipped} left alone" : "").
+                                @if (!undone.Clean)
+                                {
+                                    <ul class="mt-2">
+                                        @foreach (var problem in undone.Problems.Take(20))
+                                        {
+                                            <li><MudText Typo="Typo.caption">@problem</MudText></li>
+                                        }
+                                    </ul>
+                                }
+                            </MudAlert>
                         }
                     }
 
@@ -820,6 +935,55 @@ else
     }
 
     /// <summary>Redoes everything that hangs off the ticks. Called whenever they change.</summary>
+    // Undo -------------------------------------------------------------------
+
+    private OrganizeRun? _lastRun;
+    private bool _undoing;
+    private UndoResult? _undoResult;
+
+    private async Task RefreshLastRunAsync() => _lastRun = await Undoer.LastAsync(LibraryId);
+
+    private async Task Undo()
+    {
+        if (_lastRun is not { } run) return;
+
+        _undoing = true;
+        _undoResult = null;
+
+        try
+        {
+            _undoResult = await Undoer.UndoAsync(run.Id);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _undoing = false;
+        }
+
+        // Every path the old plan described has just changed back, so leaving
+        // it up would describe a library that no longer exists.
+        await RefreshLastRunAsync();
+        await Replan();
+    }
+
+    /// <summary>
+    /// Adds the token the numbering warning named, and replans.
+    /// </summary>
+    /// <remarks>
+    /// The warning knew the answer and still made somebody go and type it.
+    /// Appended rather than replacing: the rest of the template is their
+    /// choice, and only the missing distinction is ours to supply.
+    /// </remarks>
+    private async Task AddToken(string token)
+    {
+        _fileTemplate = $"{_fileTemplate}-{{{token}}}";
+        _tab = CustomTab;
+        await Replan();
+    }
+
     private void OnChoiceChanged()
     {
         Chosen = (_plan ?? new OrganizePlan([])).For(_chosen);
@@ -843,7 +1007,11 @@ else
         var finished = _wasRunning && !running;
         _wasRunning = running;
 
-        if (finished) await Replan();
+        if (finished)
+        {
+            await RefreshLastRunAsync();
+            await Replan();
+        }
         StateHasChanged();
     });
 
@@ -867,6 +1035,7 @@ else
             // find it again on every visit.
             _tab = _preset is null ? CustomTab : PresetsTab;
 
+            await RefreshLastRunAsync();
             await Replan();
         }
     }

@@ -91,6 +91,12 @@ public record PlannedMove(
     public IReadOnlyList<PlannedConflict> Conflicts { get; init; } = [];
 
     /// <summary>
+    /// Files given a number because the template named them the same as
+    /// something else.
+    /// </summary>
+    public IReadOnlyList<PlannedNumbering> Numberings { get; init; } = [];
+
+    /// <summary>
     /// Template tokens this model had nothing for, so a placeholder stood in.
     /// "Unsorted" and "Unfiled" are real folders once this runs, and a model
     /// landing in one is almost never what was wanted -- it just cannot be seen
@@ -115,6 +121,18 @@ public record PlannedDeletion(int FileId, string Path, string Reason, bool Verif
 
 /// <summary>A file the plan cannot move, and what would let it.</summary>
 public record PlannedConflict(int FileId, string Path, string Reason);
+
+/// <summary>
+/// A file the template could not tell from another, so it takes a number.
+/// </summary>
+/// <param name="Distinguisher">
+/// The token that would have named it properly instead — "variant" for the
+/// supported cut of a mini its plain cut is fighting with, "sculpt" for two
+/// different minis rendering to one name. Null when the two files really are
+/// alike in everything the catalog knows, and a number is the only honest
+/// answer left.
+/// </param>
+public record PlannedNumbering(int FileId, string Path, string Name, string? Distinguisher);
 
 public record OrganizePlan(IReadOnlyList<PlannedMove> Moves)
 {
@@ -145,6 +163,31 @@ public record OrganizePlan(IReadOnlyList<PlannedMove> Moves)
 
     /// <summary>Every file the plan cannot place, and why.</summary>
     public IReadOnlyList<PlannedConflict> Conflicts => [.. Moves.SelectMany(m => m.Conflicts)];
+
+    /// <summary>
+    /// Every file the template could not tell from another.
+    /// </summary>
+    /// <remarks>
+    /// Worth saying before the button rather than after. Nothing is lost by a
+    /// number — the file arrives, and the plan shows the name it arrives under
+    /// — but "is-045-tunnel-corner-2.stl" tells nobody which of the two is the
+    /// supported cut, and by the time anyone wonders, the name that knew has
+    /// gone.
+    /// </remarks>
+    public IReadOnlyList<PlannedNumbering> Numberings => [.. Moves.SelectMany(m => m.Numberings)];
+
+    /// <summary>
+    /// Tokens that would have named the numbered files properly, commonest
+    /// first, with how many each would settle.
+    /// </summary>
+    public IReadOnlyList<(string Token, int Files)> NumberingFixes =>
+    [
+        .. Numberings
+            .Where(n => n.Distinguisher is not null)
+            .GroupBy(n => n.Distinguisher!)
+            .Select(g => (g.Key, g.Count()))
+            .OrderByDescending(x => x.Item2),
+    ];
 
     /// <summary>
     /// How many models would land under each placeholder, worst first. What
@@ -320,8 +363,12 @@ public class OrganizePlanner(
 
             if (destination == model.RelativePath)
             {
+                var settled = PlanRenames(model, rules);
                 moves.Add(new PlannedMove(model.Id, model.Name, model.RelativePath, destination,
-                    MoveOutcome.AlreadyThere, Renames: PlanRenames(model, rules)));
+                    MoveOutcome.AlreadyThere, Renames: settled.Renames)
+                {
+                    Numberings = settled.Numberings,
+                });
                 continue;
             }
 
@@ -334,10 +381,12 @@ public class OrganizePlanner(
             }
 
             claimed[destination] = model.Id;
+            var moving = PlanRenames(model, rules);
             moves.Add(new PlannedMove(model.Id, model.Name, model.RelativePath, destination,
-                MoveOutcome.Move, Renames: PlanRenames(model, rules))
+                MoveOutcome.Move, Renames: moving.Renames)
             {
                 Fallbacks = FallbacksIn(rules.FolderTemplate, TokensFor(model)),
+                Numberings = moving.Numberings,
             });
         }
 
@@ -369,13 +418,28 @@ public class OrganizePlanner(
     private static string Destination(ModelEntry model, OrganizeRules rules) =>
         PathTemplate.Render(rules.FolderTemplate, TokensFor(model), forFile: false, rules.FolderCase);
 
-    private static List<PlannedRename> PlanRenames(
+    /// <summary>
+    /// What renaming a model's files comes to: the renames themselves, and any
+    /// name the template could not make unique on its own.
+    /// </summary>
+    private sealed record RenamePlan(
+        List<PlannedRename> Renames, List<PlannedNumbering> Numberings)
+    {
+        public static readonly RenamePlan None = new([], []);
+    }
+
+    private static RenamePlan PlanRenames(
         ModelEntry model, OrganizeRules rules, IEnumerable<ModelFile>? only = null)
     {
-        if (!rules.RenameFiles) return [];
+        if (!rules.RenameFiles) return RenamePlan.None;
 
         var renames = new List<PlannedRename>();
-        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var numberings = new List<PlannedNumbering>();
+
+        // Who holds each name, not merely that it is held: a file pushed to a
+        // number is worth explaining, and the explanation is what it collided
+        // with.
+        var used = new Dictionary<string, ModelFile>(StringComparer.OrdinalIgnoreCase);
         var index = 0;
 
         // What the mesh of each name is. A companion carries no variant or
@@ -430,14 +494,27 @@ public class OrganizePlanner(
             // up, and only "leave as written" keeps the brackets.
             var candidate = name;
             var suffix = 2;
-            while (!used.Add(candidate))
+            ModelFile? clashedWith = null;
+
+            while (used.TryGetValue(candidate, out var holder))
+            {
+                clashedWith ??= holder;
                 candidate = Numbered(stem, file.Extension, suffix++, rules.FileCase);
+            }
+
+            used[candidate] = file;
+
+            if (clashedWith is not null)
+            {
+                numberings.Add(new PlannedNumbering(
+                    file.Id, file.RelativePath, candidate, Distinguisher(clashedWith, file)));
+            }
 
             if (!string.Equals(candidate, file.FileName, StringComparison.Ordinal))
                 renames.Add(new PlannedRename(file.Id, file.FileName, candidate));
         }
 
-        return renames;
+        return new RenamePlan(renames, numberings);
     }
 
     /// <summary>Whether the folder template asks for a folder per sculpt.</summary>
@@ -541,14 +618,17 @@ public class OrganizePlanner(
             // collision: it is how four exports of one mini come together.
             claimed[destination] = model.Id;
 
+            var renaming = PlanRenames(model, rules, files);
+
             yield return new PlannedMove(
                 model.Id, name, model.RelativePath, destination,
                 already ? MoveOutcome.AlreadyThere : MoveOutcome.Move,
-                Renames: PlanRenames(model, rules, files))
+                Renames: renaming.Renames)
             {
                 Sculpt = name,
                 FileIds = [.. files.Select(f => f.Id)],
                 Fallbacks = FallbacksIn(rules.FolderTemplate, tokens),
+                Numberings = renaming.Numberings,
             };
         }
     }
@@ -586,6 +666,8 @@ public class OrganizePlanner(
         var deletions = new Dictionary<int, PlannedDeletion>();
         var conflicts = new Dictionary<int, PlannedConflict>();
         var renumbered = new Dictionary<int, string>();
+        var numberings = new Dictionary<int, PlannedNumbering>();
+
 
         // Every name spoken for in each destination — what is landing there and
         // what is already sitting there — so a renumbered file is given one
@@ -686,6 +768,14 @@ public class OrganizePlanner(
                     while (!taken.Add(candidate));
 
                     renumbered[loser.Id] = candidate;
+
+                    // A number is honest but says nothing. If these two files
+                    // differ in a way the template did not ask about, the
+                    // person can have real names instead by adding one token —
+                    // and they should be told before pressing the button, not
+                    // read it in a problem list afterwards.
+                    numberings[loser.Id] = new PlannedNumbering(
+                        loser.Id, loser.RelativePath, candidate, Distinguisher(keeper, loser));
                 }
                 else
                 {
@@ -705,6 +795,7 @@ public class OrganizePlanner(
                 {
                     Deletions = [.. m.FileIds.Where(deletions.ContainsKey).Select(id => deletions[id])],
                     Conflicts = [.. m.FileIds.Where(conflicts.ContainsKey).Select(id => conflicts[id])],
+                    Numberings = MergeNumberings(m, numberings),
                     Renames = Renumber(m, renumbered, byId),
                 }
                 : m)];
@@ -735,6 +826,46 @@ public class OrganizePlanner(
 
         return updated;
     }
+
+    /// <summary>
+    /// Folds a clash found across models into what one model already knew.
+    /// </summary>
+    /// <remarks>
+    /// Both passes number, and a file can be caught by either: within its own
+    /// model while the names are rendered, or against another model's once
+    /// every landing is in view. The later pass has the final name, so it wins
+    /// for any file both saw.
+    /// </remarks>
+    private static IReadOnlyList<PlannedNumbering> MergeNumberings(
+        PlannedMove move, Dictionary<int, PlannedNumbering> across)
+    {
+        var found = move.FileIds.Where(across.ContainsKey).Select(id => across[id]).ToList();
+        if (found.Count == 0) return move.Numberings;
+
+        var superseded = found.Select(n => n.FileId).ToHashSet();
+        return [.. move.Numberings.Where(n => !superseded.Contains(n.FileId)), .. found];
+    }
+
+    /// <summary>
+    /// The token that would have told two files apart, or null when nothing
+    /// the catalog knows separates them.
+    /// </summary>
+    /// <remarks>
+    /// Variant first: it is the distinction exports of one mini actually have,
+    /// and the one a person means when they say "the supported one". Sculpt
+    /// next, for two different minis rendering to one name.
+    ///
+    /// <c>{file}</c> would separate almost any pair and is deliberately not
+    /// offered. It separates them by keeping whatever the download happened to
+    /// be called — "new-items-128" — and a name nobody chose is not an answer
+    /// to "which of these is which".
+    /// </remarks>
+    private static string? Distinguisher(ModelFile a, ModelFile b) =>
+        !string.Equals(a.VariantLabel, b.VariantLabel, StringComparison.OrdinalIgnoreCase)
+            ? "variant"
+            : !string.Equals(a.SculptName, b.SculptName, StringComparison.OrdinalIgnoreCase)
+                ? "sculpt"
+                : null;
 
     /// <summary>
     /// The name a file takes when the one it wanted is already spoken for.

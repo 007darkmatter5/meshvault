@@ -16,6 +16,8 @@ public class MeshVaultDbContext(DbContextOptions<MeshVaultDbContext> options)
     public DbSet<ModelFavorite> Favorites => Set<ModelFavorite>();
     public DbSet<Setting> Settings => Set<Setting>();
     public DbSet<VariantDefinition> VariantDefinitions => Set<VariantDefinition>();
+    public DbSet<OrganizeRun> OrganizeRuns => Set<OrganizeRun>();
+    public DbSet<OrganizeStep> OrganizeSteps => Set<OrganizeStep>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {

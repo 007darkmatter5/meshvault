@@ -120,6 +120,7 @@ builder.Services.AddScoped<ModelEditor>();
 builder.Services.AddScoped<OrganizePlanner>();
 builder.Services.AddScoped<GroupPlanner>();
 builder.Services.AddScoped<OrganizeExecutor>();
+builder.Services.AddScoped<OrganizeUndo>();
 builder.Services.AddScoped<GroupStore>();
 builder.Services.AddScoped<PaintStore>();
 builder.Services.AddSingleton<ScanService>();

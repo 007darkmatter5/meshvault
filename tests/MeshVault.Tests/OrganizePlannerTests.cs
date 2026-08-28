@@ -654,5 +654,104 @@ public class OrganizePlannerTests : IDisposable
         Assert.Equal(names.Count, names.Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 
+    [Fact]
+    public async Task A_numbered_file_says_which_token_would_have_named_it()
+    {
+        // The live case: the plain and supported cuts of one mini, filed under
+        // {model}, both wanting one name. Numbering keeps both files, but only
+        // {variant} tells anyone which is which.
+        var a = await NewModel("IS 045 Tunnel Corner", "a", "IS-045-SUP-Tunnel-Corner.stl");
+        var b = await NewModel("IS 045 Tunnel Corner", "b", "IS-045-Tunnel-Corner.stl");
+        await _editor.SetDesignerAsync(a, "Dungeon Blocks");
+        await _editor.SetDesignerAsync(b, "Dungeon Blocks");
+        await ClassifyAsync(a);
+        await ClassifyAsync(b);
+
+        await using (var db = _factory.CreateDbContext())
+        {
+            var files = await db.Files.OrderBy(f => f.Id).ToListAsync();
+            files[0].SizeBytes = 100;
+            files[1].SizeBytes = 200;
+            await db.SaveChangesAsync();
+        }
+
+        var plan = await Plan(new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{sculpt}",
+            RenameFiles = true,
+            FileTemplate = "{model}",
+            FileCase = NameCase.Kebab,
+        });
+
+        var numbering = Assert.Single(plan.Numberings);
+        Assert.Equal("variant", numbering.Distinguisher);
+        Assert.Equal(("variant", 1), Assert.Single(plan.NumberingFixes));
+    }
+
+    [Fact]
+    public async Task Naming_by_variant_leaves_nothing_to_warn_about()
+    {
+        // The warning has to go away when its advice is taken, or it is noise.
+        var a = await NewModel("IS 045 Tunnel Corner", "a", "IS-045-SUP-Tunnel-Corner.stl");
+        var b = await NewModel("IS 045 Tunnel Corner", "b", "IS-045-Tunnel-Corner.stl");
+        await _editor.SetDesignerAsync(a, "Dungeon Blocks");
+        await _editor.SetDesignerAsync(b, "Dungeon Blocks");
+        await ClassifyAsync(a);
+        await ClassifyAsync(b);
+
+        var plan = await Plan(new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{sculpt}",
+            RenameFiles = true,
+            FileTemplate = "{model}-{variant}",
+            FileCase = NameCase.Kebab,
+        });
+
+        Assert.Empty(plan.Numberings);
+        Assert.Empty(plan.Conflicts);
+
+        var names = plan.Moves.SelectMany(m => m.Renames).Select(r => r.To).ToList();
+        Assert.Contains("is-045-tunnel-corner.stl", names);
+        Assert.Contains("is-045-tunnel-corner-supported.stl", names);
+    }
+
+    [Fact]
+    public async Task Files_alike_in_everything_known_get_no_advice()
+    {
+        // Two unmarked meshes of one mini. A number is the only honest answer,
+        // and suggesting a token that would not help would be worse than
+        // saying nothing.
+        var id = await NewModel("Dragon", "dragon", "a.stl", "b.stl");
+        await _editor.SetDesignerAsync(id, "Cinderwing3D");
+
+        var plan = await Plan(new OrganizeRules
+        {
+            RenameFiles = true, FileTemplate = "{model}", FileCase = NameCase.Kebab,
+        });
+
+        Assert.Empty(plan.NumberingFixes);
+    }
+
+    [Fact]
+    public async Task Numbering_inside_one_model_is_warned_about_too()
+    {
+        // The commoner shape by far: one mini, several cuts, filed under
+        // {model}. PlanRenames numbers these, and for a while only clashes
+        // *between* models were reported -- so the warning would have been
+        // silent for most of a library.
+        var id = await NewModel("Wall", "wall",
+            "UD-001-HOL-Wall.stl", "UD-001-SUP-Wall.stl", "UD-001-Wall.stl");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+        await ClassifyAsync(id);
+
+        var plan = await Plan(new OrganizeRules
+        {
+            RenameFiles = true, FileTemplate = "{model}", FileCase = NameCase.Kebab,
+        });
+
+        Assert.Equal(2, plan.Numberings.Count);
+        Assert.Equal(("variant", 2), Assert.Single(plan.NumberingFixes));
+    }
+
     public void Dispose() => _conn.Dispose();
 }
