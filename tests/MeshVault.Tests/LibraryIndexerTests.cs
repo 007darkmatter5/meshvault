@@ -40,6 +40,12 @@ public class LibraryIndexerTests : IDisposable
         return await NewIndexer(db).IndexAsync(1);
     }
 
+    private async Task<IndexResult> IndexFolder(string subPath)
+    {
+        using var db = NewDb();
+        return await NewIndexer(db).IndexFolderAsync(1, subPath);
+    }
+
     [Fact]
     public async Task First_index_adds_models_and_files()
     {
@@ -212,6 +218,119 @@ public class LibraryIndexerTests : IDisposable
         var files = await db.Files.ToListAsync();
         Assert.Equal(2, files.Count);
         Assert.All(files, f => Assert.Equal("tavern", f.SculptKey));
+    }
+
+    // Scanning one folder ---------------------------------------------------
+
+    [Fact]
+    public async Task An_inbox_scan_never_removes_the_rest_of_the_library()
+    {
+        // The one that matters. A full scan deletes every model it did not
+        // see, which is how a folder deleted on the share is noticed. Applied
+        // to a scan that only looked at the inbox, that reasoning would empty
+        // the library in one click and without asking.
+        File_("inbox/Goblin/goblin.stl");
+        File_("Dragon/dragon.stl");
+        File_("Boat/benchy.3mf");
+        await Index();
+
+        var result = await IndexFolder("inbox");
+
+        Assert.Equal(0, result.Removed);
+        using var db = NewDb();
+        Assert.Equal(3, await db.Models.CountAsync());
+    }
+
+    [Fact]
+    public async Task An_inbox_scan_finds_what_was_dropped_in_it()
+    {
+        File_("Dragon/dragon.stl");
+        await Index();
+
+        File_("inbox/Goblin/goblin.stl");
+        var result = await IndexFolder("inbox");
+
+        Assert.Equal(1, result.Added);
+        using var db = NewDb();
+
+        // Relative to the library root, not to the inbox. Reconciliation is
+        // keyed on this, so an inbox-relative "Goblin" would stand beside the
+        // real row for ever after.
+        Assert.NotNull(await db.Models.FirstOrDefaultAsync(m => m.RelativePath == "inbox/Goblin"));
+        Assert.Equal(2, await db.Models.CountAsync());
+    }
+
+    [Fact]
+    public async Task Something_deleted_from_the_inbox_is_still_noticed()
+    {
+        File_("inbox/Goblin/goblin.stl");
+        File_("Dragon/dragon.stl");
+        await Index();
+
+        Directory.Delete(Path.Combine(_root, "inbox", "Goblin"), recursive: true);
+        var result = await IndexFolder("inbox");
+
+        Assert.Equal(1, result.Removed);
+        using var db = NewDb();
+        Assert.Equal("Dragon", (await db.Models.SingleAsync()).RelativePath);
+    }
+
+    [Fact]
+    public async Task An_inbox_scan_does_not_claim_the_library_was_scanned()
+    {
+        // LastScannedUtc gates the startup scan. Stamping it after looking at
+        // one folder would skip the real rescan for the next interval.
+        File_("inbox/Goblin/goblin.stl");
+        await Index();
+
+        DateTimeOffset? after;
+        using (var db = NewDb())
+        {
+            after = (await db.Libraries.SingleAsync()).LastScannedUtc;
+            (await db.Libraries.SingleAsync()).LastScannedUtc = DateTimeOffset.UnixEpoch;
+            await db.SaveChangesAsync();
+        }
+
+        Assert.NotNull(after);
+        await IndexFolder("inbox");
+
+        using var check = NewDb();
+        Assert.Equal(DateTimeOffset.UnixEpoch, (await check.Libraries.SingleAsync()).LastScannedUtc);
+    }
+
+    [Fact]
+    public async Task Tags_on_a_model_in_the_inbox_survive_an_inbox_scan()
+    {
+        File_("inbox/Goblin/goblin.stl");
+        await Index();
+
+        using (var db = NewDb())
+        {
+            var model = await db.Models.SingleAsync();
+            model.Notes = "kept";
+            model.Tags.Add(new Tag { Name = "orc", NormalizedName = "orc" });
+            await db.SaveChangesAsync();
+        }
+
+        await IndexFolder("inbox");
+
+        using var check = NewDb();
+        var reloaded = await check.Models.Include(m => m.Tags).SingleAsync();
+        Assert.Equal("kept", reloaded.Notes);
+        Assert.Single(reloaded.Tags);
+    }
+
+    [Fact]
+    public void A_folder_outside_the_library_is_refused()
+    {
+        File_("Dragon/dragon.stl");
+
+        Assert.Throws<ArgumentException>(() =>
+            new FolderScanner().Scan(_root, "../elsewhere").ToList());
+
+        // Resolved before it is checked, so no arrangement of ".." gets out.
+        Assert.Throws<ArgumentException>(() =>
+            new FolderScanner().Scan(_root, "Dragon/../../elsewhere").ToList());
     }
 
     public void Dispose()

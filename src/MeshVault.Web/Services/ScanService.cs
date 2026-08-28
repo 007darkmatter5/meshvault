@@ -26,16 +26,29 @@ public class ScanService(IServiceScopeFactory scopeFactory, ILogger<ScanService>
 
     public bool IsRunning(int libraryId) => _running.ContainsKey(libraryId);
 
-    public bool TryStart(int libraryId)
+    /// <summary>
+    /// Starts a scan, of the whole library or of one folder inside it.
+    /// </summary>
+    /// <param name="subPath">
+    /// A folder relative to the library root -- the inbox, in practice -- or
+    /// null for the whole library.
+    /// </param>
+    /// <remarks>
+    /// Both kinds take the same per-library slot, so a folder scan and a full
+    /// one cannot run against the same library at once. They would be reading
+    /// and writing the same rows while sharing one progress display, and
+    /// nothing good is on the other side of letting them.
+    /// </remarks>
+    public bool TryStart(int libraryId, string? subPath = null)
     {
         if (!_running.TryAdd(libraryId, 0)) return false;
 
         Update(new ScanStatus(libraryId, true, "Starting...", null, DateTimeOffset.UtcNow));
-        _ = Task.Run(() => RunAsync(libraryId));
+        _ = Task.Run(() => RunAsync(libraryId, subPath));
         return true;
     }
 
-    private async Task RunAsync(int libraryId)
+    private async Task RunAsync(int libraryId, string? subPath)
     {
         ScanStatus status;
         try
@@ -46,10 +59,16 @@ public class ScanService(IServiceScopeFactory scopeFactory, ILogger<ScanService>
             var progress = new Progress<ScanProgress>(p => Update(new ScanStatus(
                 libraryId, true, Describe(p), null, DateTimeOffset.UtcNow, p)));
 
-            var result = await indexer.IndexAsync(libraryId, progress);
+            var result = string.IsNullOrWhiteSpace(subPath)
+                ? await indexer.IndexAsync(libraryId, progress)
+                : await indexer.IndexFolderAsync(libraryId, subPath, progress);
+
+            // Which folder was looked at, because "removed 0" reads very
+            // differently depending on whether the whole library was walked.
+            var where = string.IsNullOrWhiteSpace(subPath) ? "" : $"{subPath}/: ";
 
             status = new ScanStatus(libraryId, false,
-                $"Added {result.Added}, updated {result.Updated}, removed {result.Removed}.",
+                $"{where}Added {result.Added}, updated {result.Updated}, removed {result.Removed}.",
                 result, DateTimeOffset.UtcNow);
         }
         catch (Exception ex)

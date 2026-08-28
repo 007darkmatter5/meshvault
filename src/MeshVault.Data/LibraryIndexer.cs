@@ -25,17 +25,60 @@ public class LibraryIndexer(
     /// minutes, and reporting per model would flood the UI.</summary>
     private static readonly TimeSpan ProgressInterval = TimeSpan.FromMilliseconds(400);
 
-    public async Task<IndexResult> IndexAsync(
+    /// <summary>Reconciles the whole library with what is on disk.</summary>
+    public Task<IndexResult> IndexAsync(
         int libraryId,
         IProgress<ScanProgress>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        IndexCoreAsync(libraryId, null, progress, ct);
+
+    /// <summary>
+    /// Reconciles one folder inside the library â the inbox, in practice â
+    /// leaving everything outside it untouched.
+    /// </summary>
+    /// <remarks>
+    /// Noticing three new files should not cost a walk of the whole share. The
+    /// inbox is small and is where new things land, so scanning just that is
+    /// the difference between seconds and minutes.
+    ///
+    /// <b>The removal set is narrowed to the same folder, and that is the whole
+    /// safety of this method.</b> A full scan deletes every model it did not
+    /// see, which is how a folder deleted on the share is noticed. Run that
+    /// reasoning after looking at the inbox alone and it would delete the
+    /// entire library, instantly and without asking. Within the folder,
+    /// removal still works as it should: delete something from the inbox, scan
+    /// the inbox, and it goes.
+    /// </remarks>
+    public Task<IndexResult> IndexFolderAsync(
+        int libraryId,
+        string subPath,
+        IProgress<ScanProgress>? progress = null,
+        CancellationToken ct = default) =>
+        IndexCoreAsync(libraryId, subPath, progress, ct);
+
+    private async Task<IndexResult> IndexCoreAsync(
+        int libraryId,
+        string? subPath,
+        IProgress<ScanProgress>? progress,
+        CancellationToken ct)
     {
         var library = await db.Libraries.FirstOrDefaultAsync(l => l.Id == libraryId, ct)
             ?? throw new InvalidOperationException($"Library {libraryId} not found.");
 
-        var existing = await db.Models
+        // Only the models inside the folder being scanned. This set is also
+        // what gets pruned at the end, so narrowing it here is what stops an
+        // inbox scan reading the rest of the library as deleted.
+        var scope = Inbox.Normalize(subPath);
+
+        var models = db.Models.Where(m => m.LibraryId == libraryId);
+        if (scope.Length > 0)
+        {
+            models = models.Where(m =>
+                m.RelativePath == scope || m.RelativePath.StartsWith(scope + "/"));
+        }
+
+        var existing = await models
             .Include(m => m.Files)
-            .Where(m => m.LibraryId == libraryId)
             .ToDictionaryAsync(m => m.RelativePath, ct);
 
         var seen = new HashSet<string>();
@@ -43,7 +86,7 @@ public class LibraryIndexer(
         var now = DateTimeOffset.UtcNow;
         var nextReport = DateTimeOffset.UtcNow + ProgressInterval;
 
-        foreach (var scanned in scanner.Scan(library.Path, ct))
+        foreach (var scanned in scanner.Scan(library.Path, subPath, ct))
         {
             ct.ThrowIfCancellationRequested();
             seen.Add(scanned.RelativePath);
@@ -80,7 +123,11 @@ public class LibraryIndexer(
         var removed = existing.Where(kv => !seen.Contains(kv.Key)).Select(kv => kv.Value).ToList();
         db.Models.RemoveRange(removed);
 
-        library.LastScannedUtc = now;
+        // Only a full pass counts as "the library was scanned". Stamping this
+        // after looking at the inbox would tell the startup scan the share had
+        // been walked, and the real rescan would be skipped for the next
+        // RescanIntervalHours.
+        if (scope.Length == 0) library.LastScannedUtc = now;
 
         // Saving a whole network share's worth of changes takes a moment; say so
         // rather than appearing to stall at the last reported count.

@@ -25,14 +25,50 @@ public class FolderScanner
     /// file. Its non-model subfolders (images, docs, variants without meshes) are
     /// absorbed into it, so "Dragon/{files,supports/,photos/}" stays one entry.
     /// </summary>
-    public IEnumerable<ScannedModel> Scan(string rootPath, CancellationToken ct = default)
+    public IEnumerable<ScannedModel> Scan(string rootPath, CancellationToken ct = default) =>
+        Scan(rootPath, null, ct);
+
+    /// <summary>
+    /// The same walk, begun at <paramref name="subPath"/> inside the library
+    /// rather than at its root.
+    /// </summary>
+    /// <remarks>
+    /// Every path still comes back relative to the <b>library root</b>, not to
+    /// the folder walked. That is the whole point and the only tricky part:
+    /// reconciliation is keyed on <see cref="Core.Models.ModelEntry.RelativePath"/>,
+    /// so a scan of the inbox that reported inbox-relative paths would read as
+    /// a library full of new models beside the ones already recorded.
+    ///
+    /// A sub-path is resolved before it is checked, so no arrangement of ".."
+    /// walks out of the library.
+    /// </remarks>
+    public IEnumerable<ScannedModel> Scan(string rootPath, string? subPath,
+        CancellationToken ct = default)
     {
         if (!Directory.Exists(rootPath))
             throw new DirectoryNotFoundException($"Library root not found: {rootPath}");
 
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+        var start = root;
 
-        foreach (var dir in EnumerateDirectories(root, ct))
+        if (!string.IsNullOrWhiteSpace(subPath))
+        {
+            start = Path.TrimEndingDirectorySeparator(Path.GetFullPath(
+                Path.Combine(root, subPath.Replace('/', Path.DirectorySeparatorChar))));
+
+            if (!start.Equals(root, StringComparison.OrdinalIgnoreCase)
+                && !start.StartsWith(root + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException(
+                    $"'{subPath}' is not inside the library.", nameof(subPath));
+            }
+
+            if (!Directory.Exists(start))
+                throw new DirectoryNotFoundException($"Folder not found: {start}");
+        }
+
+        foreach (var dir in EnumerateDirectories(start, ct))
         {
             ct.ThrowIfCancellationRequested();
 

@@ -149,6 +149,15 @@
                     <MudIconButton Icon="@Icons.Material.Filled.Merge" Size="Size.Small"
                                    Href="@($"/libraries/{context.Id}/regroup")" />
                 </MudTooltip>
+                <MudTooltip Text="@(HasInbox(context)
+                                    ? $"Scan only {Inbox.Normalize(context.InboxPath)}/ - seconds, not a walk of the whole share"
+                                    : "This library has no inbox folder set")">
+                    <span>
+                        <MudIconButton Icon="@Icons.Material.Filled.MoveToInbox" Size="Size.Small"
+                                       Disabled="@(Scans.IsRunning(context.Id) || !HasInbox(context))"
+                                       OnClick="@(() => ScanInbox(context))" />
+                    </span>
+                </MudTooltip>
                 <MudTooltip Text="Rescan this library">
                     <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small"
                                    Disabled="@Scans.IsRunning(context.Id)"
@@ -273,6 +282,22 @@
             _newPath = picked;
             _error = null;
         }
+    }
+
+    private static bool HasInbox(Library library) =>
+        Inbox.Normalize(library.InboxPath).Length > 0;
+
+    /// <summary>
+    /// Scans just the inbox. What "I dropped three files in there" needs, and
+    /// what a full walk of a slow share is a poor answer to.
+    /// </summary>
+    private void ScanInbox(Library library)
+    {
+        var inbox = Inbox.Normalize(library.InboxPath);
+        if (inbox.Length == 0) return;
+
+        if (Scans.TryStart(library.Id, inbox))
+            Snackbar.Add($"Scanning {inbox}/", Severity.Info);
     }
 
     private void Scan(int libraryId)

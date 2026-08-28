@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 dotnet build                                  # whole solution
-dotnet test                                   # all 508 tests, ~6s
+dotnet test                                   # all 517 tests, ~6s
 dotnet run --project src/MeshVault.Web        # http://localhost:5082 in Development
 
 # One class, or one test
@@ -132,6 +132,14 @@ things like which file a card image points at.
 
 `Library.InboxPath` names a folder *inside* the library where downloads land. Being inside matters:
 filing is then a rename on one volume rather than a copy between two, and the model keeps its id.
+
+`LibraryIndexer.IndexFolderAsync` scans the inbox alone, so noticing three new files does not cost
+a walk of the whole share. Two things make it safe, and both are easy to undo by accident:
+`FolderScanner.Scan(root, subPath)` still reports paths **relative to the library root** (the
+reconciliation key), and the removal set is narrowed to models inside that folder. A full scan
+deletes every model it did not see; run that after looking only at the inbox and it empties the
+library in one click. `An_inbox_scan_never_removes_the_rest_of_the_library` pins it. A partial scan
+also leaves `LastScannedUtc` alone, or it would tell the startup scan the share had been walked.
 
 Nothing promotes a model out of it. A folder template never yields a path inside the inbox, so
 filing empties it as a side effect. `Inbox.Missing` blocks a model only for a **designer or tag** —
