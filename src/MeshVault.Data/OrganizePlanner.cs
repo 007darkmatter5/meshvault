@@ -341,7 +341,7 @@ public class OrganizePlanner(
             });
         }
 
-        return new OrganizePlan(MarkColliding(moves, models));
+        return new OrganizePlan(MarkColliding(moves, models, rules));
     }
 
     /// <summary>"a designer", "a designer and a tag", "a designer, a tag and a licence".</summary>
@@ -431,14 +431,7 @@ public class OrganizePlanner(
             var candidate = name;
             var suffix = 2;
             while (!used.Add(candidate))
-            {
-                var numbered = rules.FileCase == NameCase.AsWritten
-                    ? $"{stem} ({suffix})"
-                    : NameCasing.Apply($"{stem} {suffix}", rules.FileCase);
-
-                candidate = numbered + file.Extension;
-                suffix++;
-            }
+                candidate = Numbered(stem, file.Extension, suffix++, rules.FileCase);
 
             if (!string.Equals(candidate, file.FileName, StringComparison.Ordinal))
                 renames.Add(new PlannedRename(file.Id, file.FileName, candidate));
@@ -574,7 +567,8 @@ public class OrganizePlanner(
     /// claims travels with its folder untouched: deleting it would be tidying
     /// up somebody's library uninvited.
     /// </remarks>
-    private static List<PlannedMove> MarkColliding(List<PlannedMove> moves, List<ModelEntry> models)
+    private static List<PlannedMove> MarkColliding(
+        List<PlannedMove> moves, List<ModelEntry> models, OrganizeRules rules)
     {
         var byId = models.SelectMany(m => m.Files).ToDictionary(f => f.Id);
 
@@ -591,6 +585,39 @@ public class OrganizePlanner(
 
         var deletions = new Dictionary<int, PlannedDeletion>();
         var conflicts = new Dictionary<int, PlannedConflict>();
+        var renumbered = new Dictionary<int, string>();
+
+        // Every name spoken for in each destination — what is landing there and
+        // what is already sitting there — so a renumbered file is given one
+        // nothing else has claimed.
+        var takenAt = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+
+        HashSet<string> TakenAt(string to)
+        {
+            if (takenAt.TryGetValue(to, out var names)) return names;
+
+            names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var file in byId.Values)
+            {
+                var folder = file.RelativePath.Contains('/')
+                    ? file.RelativePath[..file.RelativePath.LastIndexOf('/')]
+                    : "";
+
+                if (string.Equals(folder, to, StringComparison.OrdinalIgnoreCase))
+                    names.Add(file.FileName);
+            }
+
+            foreach (var name in moves
+                .Where(m => m.Outcome == MoveOutcome.Move
+                    && string.Equals(m.To, to, StringComparison.OrdinalIgnoreCase))
+                .SelectMany(m => m.FileIds.Where(byId.ContainsKey).Select(LandsAs)))
+            {
+                names.Add(name);
+            }
+
+            return takenAt[to] = names;
+        }
 
         var landings = moves
             .Where(m => m.Outcome == MoveOutcome.Move)
@@ -639,6 +666,27 @@ public class OrganizePlanner(
                         $"Looks like a copy of {keeper.RelativePath}, which is going to the same "
                         + "place. Checked byte for byte before anything is removed.");
                 }
+                else if (rules.RenameFiles)
+                {
+                    // Renaming is on, so the name is ours to choose and a clash
+                    // is a numbering job rather than a reason to leave a file
+                    // behind. PlanRenames already numbers within one model; it
+                    // cannot do this, because two models merging are named a
+                    // model at a time and neither knows about the other. Here
+                    // every landing in the library is in view at once.
+                    var taken = TakenAt(landing.Key.To);
+                    var stem = Path.GetFileNameWithoutExtension(landing.Key.FileName);
+
+                    string candidate;
+                    var suffix = 2;
+                    do
+                    {
+                        candidate = Numbered(stem, loser.Extension, suffix++, rules.FileCase);
+                    }
+                    while (!taken.Add(candidate));
+
+                    renumbered[loser.Id] = candidate;
+                }
                 else
                 {
                     conflicts[loser.Id] = new PlannedConflict(loser.Id, loser.RelativePath,
@@ -648,17 +696,60 @@ public class OrganizePlanner(
             }
         }
 
-        if (deletions.Count == 0 && conflicts.Count == 0) return moves;
+        if (deletions.Count == 0 && conflicts.Count == 0 && renumbered.Count == 0) return moves;
 
         return [.. moves.Select(m =>
-            m.FileIds.Any(id => deletions.ContainsKey(id) || conflicts.ContainsKey(id))
+            m.FileIds.Any(id =>
+                deletions.ContainsKey(id) || conflicts.ContainsKey(id) || renumbered.ContainsKey(id))
                 ? m with
                 {
                     Deletions = [.. m.FileIds.Where(deletions.ContainsKey).Select(id => deletions[id])],
                     Conflicts = [.. m.FileIds.Where(conflicts.ContainsKey).Select(id => conflicts[id])],
+                    Renames = Renumber(m, renumbered, byId),
                 }
                 : m)];
     }
+
+    /// <summary>
+    /// Rewrites a move's renames with the names a clash forced.
+    /// </summary>
+    /// <remarks>
+    /// A file that had no rename of its own still gets one: the template
+    /// produced the name it already has, and only the clash makes a rename
+    /// necessary.
+    /// </remarks>
+    private static IReadOnlyList<PlannedRename> Renumber(
+        PlannedMove move, Dictionary<int, string> renumbered, Dictionary<int, ModelFile> byId)
+    {
+        if (!move.FileIds.Any(renumbered.ContainsKey)) return move.Renames;
+
+        var updated = move.Renames
+            .Select(r => renumbered.TryGetValue(r.FileId, out var name) ? r with { To = name } : r)
+            .ToList();
+
+        updated.AddRange(move.FileIds
+            .Where(id => renumbered.ContainsKey(id)
+                && byId.ContainsKey(id)
+                && move.Renames.All(r => r.FileId != id))
+            .Select(id => new PlannedRename(id, byId[id].FileName, renumbered[id])));
+
+        return updated;
+    }
+
+    /// <summary>
+    /// The name a file takes when the one it wanted is already spoken for.
+    /// </summary>
+    /// <remarks>
+    /// Shared so the two places that number agree: within a model while the
+    /// names are rendered, and across models once every landing is in view.
+    /// A number has to obey the convention as well — "spring-dragon (2)" is not
+    /// kebab-case, and a rule that held for every name but the duplicates would
+    /// be worse than no rule.
+    /// </remarks>
+    private static string Numbered(string stem, string extension, int suffix, NameCase casing) =>
+        (casing == NameCase.AsWritten
+            ? $"{stem} ({suffix})"
+            : NameCasing.Apply($"{stem} {suffix}", casing)) + extension;
 
     private static readonly HashSet<string> SidecarNames =
         new(StringComparer.OrdinalIgnoreCase) { "datapackage.json" };

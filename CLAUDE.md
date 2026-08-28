@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 dotnet build                                  # whole solution
-dotnet test                                   # all 491 tests, ~6s
+dotnet test                                   # all 493 tests, ~6s
 dotnet run --project src/MeshVault.Web        # http://localhost:5082 in Development
 
 # One class, or one test
@@ -145,6 +145,13 @@ either is or is not, and `otto-bismark-plain` says nothing `otto-bismark` does n
 still says so even as the only copy owned, so the rule is per file and not "does this sculpt need
 disambiguating". `Sanitize` then trims a stray leading or trailing `-`, `_` or space, or
 `{sculpt}-{variant}` would leave the template showing through as a dangling dash.
+
+Names are numbered in **two** places, and both are needed. `PlanRenames` numbers within one model,
+while the names are being rendered. `MarkColliding` numbers *across* models, because a destination
+is not per model — `{sculpt}` exists to bring separate folders holding one mini together, and two
+merging models are named one at a time with neither aware of the other. Only `MarkColliding` sees
+every landing in the library at once, so it is the only place that can. With renaming **off** a
+clash is still a `PlannedConflict`: the name is not ours to choose, so the file stays put.
 
 Rules the executor will not bend:
 

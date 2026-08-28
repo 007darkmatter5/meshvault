@@ -644,6 +644,51 @@ public class OrganizeExecutorTests : IDisposable
         Assert.Single(Directory.GetFiles(folder));
     }
 
+    [Fact]
+    public async Task Merging_models_both_keep_their_file_on_disk()
+    {
+        // Both folders hold the same mini, so {sculpt} brings them together.
+        // Under {model} both files want one name, and the loser used to be
+        // left behind in a folder the plan said would be emptied.
+        await NewModel("inbox/a", "IS-045-SUP-Tunnel-Corner.stl");
+        await NewModel("inbox/b", "IS-045-Tunnel-Corner.stl");
+
+        await using (var seed = _factory.CreateDbContext())
+        {
+            foreach (var model in await seed.Models.Include(m => m.Files).ToListAsync())
+            {
+                model.Name = "IS 045 Tunnel Corner";
+                foreach (var f in model.Files) f.SizeBytes = f.FileName.Length * 10;
+            }
+            await seed.SaveChangesAsync();
+        }
+
+        var plan = await _planner.PlanAsync(1, new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{sculpt}",
+            RenameFiles = true,
+            FileTemplate = "{model}",
+            FileCase = NameCase.Kebab,
+        });
+
+        Assert.Empty(plan.Conflicts);
+
+        var result = await _executor.ApplyAsync(1, plan);
+        Assert.True(result.Clean, string.Join("; ", result.Problems));
+
+        var folder = Path.Combine(_root, "Dungeon Blocks", "IS 045 Tunnel Corner");
+        var onDisk = Directory.GetFiles(folder).Select(Path.GetFileName).OrderBy(n => n).ToList();
+
+        Assert.Equal(2, onDisk.Count);
+        Assert.Contains("is-045-tunnel-corner.stl", onDisk);
+        Assert.Contains("is-045-tunnel-corner-2.stl", onDisk);
+
+        // And the database says the same, or the next scan undoes it.
+        await using var check = _factory.CreateDbContext();
+        foreach (var file in await check.Files.ToListAsync())
+            Assert.True(Exists(file.RelativePath), $"{file.RelativePath} is not on disk");
+    }
+
     public void Dispose()
     {
         _conn.Dispose();

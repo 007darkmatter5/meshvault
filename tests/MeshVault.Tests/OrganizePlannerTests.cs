@@ -616,5 +616,43 @@ public class OrganizePlannerTests : IDisposable
         Assert.DoesNotContain(names, n => n.Contains("-2."));
     }
 
+    [Fact]
+    public async Task Two_models_merging_do_not_strand_a_file_over_a_name()
+    {
+        // {sculpt} exists to bring separate folders holding one mini together.
+        // When they merge, their file names are computed a model at a time, so
+        // two files can arrive under the same name each knowing nothing of the
+        // other -- and one is left behind rather than numbered.
+        var a = await NewModel("IS 045 Tunnel Corner", "a", "IS-045-SUP-Tunnel-Corner.stl");
+        var b = await NewModel("IS 045 Tunnel Corner", "b", "IS-045-Tunnel-Corner.stl");
+        await _editor.SetDesignerAsync(a, "Dungeon Blocks");
+        await _editor.SetDesignerAsync(b, "Dungeon Blocks");
+        await ClassifyAsync(a);
+        await ClassifyAsync(b);
+
+        // Different lengths, so they are certainly not copies of each other.
+        await using (var db = _factory.CreateDbContext())
+        {
+            var files = await db.Files.OrderBy(f => f.Id).ToListAsync();
+            files[0].SizeBytes = 100;
+            files[1].SizeBytes = 200;
+            await db.SaveChangesAsync();
+        }
+
+        var plan = await Plan(new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{sculpt}",
+            RenameFiles = true,
+            FileTemplate = "{model}",
+            FileCase = NameCase.Kebab,
+        });
+
+        var names = plan.Moves.SelectMany(m => m.Renames).Select(r => r.To).ToList();
+
+        Assert.Empty(plan.Conflicts);
+        Assert.Equal(2, names.Count);
+        Assert.Equal(names.Count, names.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
+
     public void Dispose() => _conn.Dispose();
 }
