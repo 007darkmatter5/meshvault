@@ -345,6 +345,12 @@ else
                                 @_chosen.Count of @_actionable.Count chosen
                             </MudChip>
                             <MudSpacer />
+                            <MudTextField @bind-Value="_search" Placeholder="Find a model"
+                                          Adornment="Adornment.Start" Clearable="true"
+                                          AdornmentIcon="@Icons.Material.Filled.Search"
+                                          Margin="Margin.Dense" Variant="Variant.Outlined"
+                                          Immediate="true" DebounceInterval="200"
+                                          Class="mt-0 mr-3" Style="max-width:220px" />
                             <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="ChooseAll"
                                        Disabled="@(_chosen.Count == _actionable.Count)">All</MudButton>
                             <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="ChooseNone"
@@ -716,6 +722,9 @@ else
     private NameCase _folderCase;
     private NameCase _fileCase;
     private bool _onlyChanges = true;
+
+    /// <summary>Narrows the table to one model, for "does this need organising?".</summary>
+    private string? _search;
     private List<string> _folderProblems = [];
     private List<string> _fileProblems = [];
 
@@ -1063,10 +1072,35 @@ else
     /// model that is otherwise staying put — hiding the row that removes a file
     /// is exactly how a deletion goes unnoticed.
     /// </summary>
-    private bool Show(PlannedMove move) =>
-        !_onlyChanges
-        || move.Outcome != MoveOutcome.AlreadyThere
-        || move.Renames.Count > 0
-        || move.Deletions.Count > 0
-        || move.Conflicts.Count > 0;
+    private bool Show(PlannedMove move)
+    {
+        if (!Matches(move)) return false;
+
+        // A search overrides "only what would change". Looking a model up to
+        // see whether it needs organising has to be able to answer "no" — and
+        // a filter that hid it would make no different from not found.
+        if (_search is { Length: > 0 }) return true;
+
+        return !_onlyChanges
+            || move.Outcome != MoveOutcome.AlreadyThere
+            || move.Renames.Count > 0
+            || move.Deletions.Count > 0
+            || move.Conflicts.Count > 0;
+    }
+
+    /// <summary>
+    /// Whether a row answers the search. Matched against where it is as well as
+    /// its name, so a half-remembered folder finds it too.
+    /// </summary>
+    private bool Matches(PlannedMove move)
+    {
+        if (_search is not { Length: > 0 } needle) return true;
+
+        return move.ModelName.Contains(needle, StringComparison.OrdinalIgnoreCase)
+            || move.From.Contains(needle, StringComparison.OrdinalIgnoreCase)
+            || move.To.Contains(needle, StringComparison.OrdinalIgnoreCase)
+            || move.Renames.Any(r =>
+                r.From.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                || r.To.Contains(needle, StringComparison.OrdinalIgnoreCase));
+    }
 }
