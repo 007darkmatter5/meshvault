@@ -99,6 +99,46 @@ public class MetadataTests : IDisposable
         Assert.Null(model.DesignerId);
     }
 
+    [Fact]
+    public async Task Every_designer_is_offered_not_just_the_busiest_ten()
+    {
+        // The picker showed ten, ordered by how many models each had, so a
+        // library with more than ten hid the rest until you typed -- and typing
+        // is what created a designer nobody meant.
+        for (var i = 0; i < 25; i++)
+            await _editor.SetDesignerAsync(await NewModel($"M{i}"), $"Designer {i:00}");
+
+        var all = await _editor.SuggestDesignersAsync("");
+
+        Assert.Equal(25, all.Count);
+        Assert.Equal("Designer 00", all[0].Name);
+        Assert.Equal("Designer 24", all[^1].Name);
+    }
+
+    [Fact]
+    public async Task A_search_still_narrows_and_a_limit_is_still_honoured()
+    {
+        await _editor.SetDesignerAsync(await NewModel("A"), "Cinderwing3D");
+        await _editor.SetDesignerAsync(await NewModel("B"), "Loubie");
+        await _editor.SetDesignerAsync(await NewModel("C"), "Printed Obsession");
+
+        Assert.Equal("Cinderwing3D", (await _editor.SuggestDesignersAsync("ci")).Single().Name);
+        Assert.Equal(2, (await _editor.SuggestDesignersAsync("", limit: 2)).Count);
+    }
+
+    [Fact]
+    public async Task A_designer_can_be_checked_for_before_one_is_created()
+    {
+        // What the pages ask before turning "Ci" into a designer called "Ci".
+        await _editor.SetDesignerAsync(await NewModel("A"), "Cinderwing3D");
+
+        Assert.True(await _editor.DesignerExistsAsync("Cinderwing3D"));
+        Assert.True(await _editor.DesignerExistsAsync("  cinderwing3d  "));
+        Assert.False(await _editor.DesignerExistsAsync("Ci"));
+        Assert.False(await _editor.DesignerExistsAsync(""));
+        Assert.False(await _editor.DesignerExistsAsync(null));
+    }
+
     // Source URLs -----------------------------------------------------------
 
     [Theory]

@@ -11,6 +11,7 @@
 @inject AuthenticationStateProvider AuthState
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject IDialogService Dialogs
 
 <PageTitle>@(_model?.Name ?? "Model") - MeshVault</PageTitle>
 
@@ -300,10 +301,13 @@ else
             <MudPaper Outlined="true" Class="pa-4 mb-4">
                 <MudText Typo="Typo.overline" Class="mud-text-secondary">Source</MudText>
 
+                @* MaxItems null, or MudBlazor caps the list at ten of its own
+                   accord however many the search returns. *@
                 <MudAutocomplete T="string" Value="_designerName" ValueChanged="SetDesigner"
                                  SearchFunc="SearchDesigners" Label="Designer" Variant="Variant.Outlined"
                                  Margin="Margin.Dense" Class="mt-2" Clearable="true" CoerceValue="true"
-                                 HelperText="Type a new name to create them" />
+                                 MaxItems="null"
+                                 HelperText="Pick from the list, or type a new name to create them" />
 
                 <MudTextField @bind-Value="_sourceUrl" Label="Source URL" Variant="Variant.Outlined"
                               Margin="Margin.Dense" Class="mt-3" Immediate="true"
@@ -751,14 +755,50 @@ else
 
     private async Task<IEnumerable<string>> SearchDesigners(string value, CancellationToken ct)
     {
-        var designers = await Editor.SuggestDesignersAsync(value ?? "", 10, ct);
+        // No cap. The whole list is what makes picking possible instead of
+        // typing, and typing is what creates a designer nobody meant.
+        var designers = await Editor.SuggestDesignersAsync(value ?? "", limit: null, ct);
         return designers.Select(d => d.Name);
     }
 
+    /// <summary>
+    /// Assigns the designer, asking first when the name is one the library has
+    /// never seen.
+    /// </summary>
+    /// <remarks>
+    /// CoerceValue takes whatever is in the box when it loses focus, matched or
+    /// not, and SetDesignerAsync creates any name it does not recognise. Between
+    /// them, typing "Ci" to find Cinderwing3D and then clicking away created a
+    /// designer called "Ci" and assigned the model to it. Coercion still stands
+    /// -- typing a genuinely new name is a real thing to want -- but creating
+    /// one is now something you say yes to.
+    /// </remarks>
     private async Task SetDesigner(string? name)
     {
         if (_model is null) return;
-        _designerName = name ?? "";
+
+        var chosen = (name ?? "").Trim();
+
+        if (chosen.Length > 0 && !await Editor.DesignerExistsAsync(chosen))
+        {
+            var confirmed = await Dialogs.ShowMessageBoxAsync(
+                $"Create {chosen}?",
+                "No designer by that name exists yet, so this will make one. If you were part "
+                + "way through typing a name that already exists, cancel and pick it from the list.",
+                yesText: "Create", noText: null, cancelText: "Cancel");
+
+            if (confirmed != true)
+            {
+                // Put the field back to what the model actually says. The
+                // control is Value/ValueChanged rather than @bind precisely so
+                // that a rejected edit can be refused rather than merely undone
+                // afterwards.
+                _designerName = _model.Designer?.Name ?? "";
+                return;
+            }
+        }
+
+        _designerName = chosen;
         await Editor.SetDesignerAsync(_model.Id, _designerName);
         await LoadAsync();
         Snackbar.Add(string.IsNullOrWhiteSpace(_designerName) ? "Designer cleared" : $"Designer set to {_designerName}",

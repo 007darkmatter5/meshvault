@@ -327,16 +327,51 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
         await db.Designers.Where(d => d.Id == designerId).ExecuteDeleteAsync(ct);
     }
 
-    public async Task<List<Designer>> SuggestDesignersAsync(string prefix, int limit = 10,
+    /// <summary>
+    /// Designers whose name contains <paramref name="prefix"/>, or all of them
+    /// when it is blank.
+    /// </summary>
+    /// <param name="limit">A ceiling on the results, or null for all of them.</param>
+    /// <remarks>
+    /// Uncapped by default, and alphabetical. It used to hand back the ten with
+    /// the most models, which made opening the picker show an arbitrary-looking
+    /// ten and hid everyone else until you typed -- and typing is exactly what
+    /// creates a designer by accident. A list you can scan is the fix for both:
+    /// there is no reason to type at all when the name is already on screen.
+    ///
+    /// Alphabetical because the list is now complete. Ordering by model count
+    /// is a good answer to "who matters most" and a poor one to "where is
+    /// Cinderwing3D in this list".
+    /// </remarks>
+    public async Task<List<Designer>> SuggestDesignersAsync(string prefix, int? limit = null,
         CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         var term = (prefix ?? "").Trim().ToLowerInvariant();
-        return await db.Designers.AsNoTracking()
+
+        IQueryable<Designer> query = db.Designers.AsNoTracking()
             .Where(d => term == "" || EF.Functions.Like(d.NormalizedName, $"%{term}%"))
-            .OrderByDescending(d => d.Models.Count).ThenBy(d => d.Name)
-            .Take(limit)
-            .ToListAsync(ct);
+            .OrderBy(d => d.Name);
+
+        if (limit is int cap) query = query.Take(cap);
+
+        return await query.ToListAsync(ct);
+    }
+
+    /// <summary>Whether a designer of this name already exists.</summary>
+    /// <remarks>
+    /// Asked before creating one, so that half a name typed while searching can
+    /// be questioned rather than quietly turned into a designer called "Ci".
+    /// Matched on the normalised name, the same way
+    /// <see cref="SetDesignerAsync"/> decides whether to create.
+    /// </remarks>
+    public async Task<bool> DesignerExistsAsync(string? name, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var normalized = name.Trim().ToLowerInvariant();
+        return await db.Designers.AnyAsync(d => d.NormalizedName == normalized, ct);
     }
 
     // Collections -----------------------------------------------------------

@@ -1,4 +1,5 @@
 @inject ModelEditor Editor
+@inject IDialogService Dialogs
 
 <MudDialog>
     <TitleContent>
@@ -14,9 +15,12 @@
 
             @* Designer ---------------------------------------------------- *@
             <div>
+                @* MaxItems null, or MudBlazor caps the list at ten of its own
+                   accord however many the search returns. *@
                 <MudAutocomplete T="string" @bind-Value="_designer" SearchFunc="SearchDesigners"
                                  Label="Set designer" Variant="Variant.Outlined" Margin="Margin.Dense"
                                  CoerceValue="true" Clearable="true" Disabled="@_clearDesigner"
+                                 MaxItems="null"
                                  HelperText="Pick an existing designer or type a new name." />
                 <MudCheckBox @bind-Value="_clearDesigner" Dense="true" Size="Size.Small"
                              Label="Remove the designer instead" />
@@ -111,13 +115,32 @@
 
     private async Task<IEnumerable<string>> SearchDesigners(string value, CancellationToken ct)
     {
-        var designers = await Editor.SuggestDesignersAsync(value ?? "", 10, ct);
+        var designers = await Editor.SuggestDesignersAsync(value ?? "", limit: null, ct);
         return designers.Select(d => d.Name);
     }
 
+    /// <summary>
+    /// Applies the edit, asking first when the designer typed is a name the
+    /// library has never seen. Same guard as the model page, and the stakes are
+    /// higher here: a mistyped name is about to be given to every model ticked.
+    /// </summary>
     private async Task Apply()
     {
         _error = null;
+
+        if (!_clearDesigner && !string.IsNullOrWhiteSpace(_designer)
+            && !await Editor.DesignerExistsAsync(_designer))
+        {
+            var confirmed = await Dialogs.ShowMessageBoxAsync(
+                $"Create {_designer.Trim()}?",
+                $"No designer by that name exists yet, so this will make one and give it to "
+                + $"{Count} model{(Count == 1 ? "" : "s")}. If you were part way through typing "
+                + "a name that already exists, cancel and pick it from the list.",
+                yesText: "Create", noText: null, cancelText: "Cancel");
+
+            if (confirmed != true) return;
+        }
+
         _applying = true;
         try
         {
