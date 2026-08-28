@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 dotnet build                                  # whole solution
-dotnet test                                   # all 486 tests, ~6s
+dotnet test                                   # all 491 tests, ~6s
 dotnet run --project src/MeshVault.Web        # http://localhost:5082 in Development
 
 # One class, or one test
@@ -138,6 +138,13 @@ is permission, not instruction, and is checked in the executor rather than only 
 `{sculpt}` in the folder template is the one token that changes how many folders come out of a
 model: a pack of ninety-eight breaks apart, and four folders holding one mini between them come
 together. Same rule, both directions.
+
+`{variant}` is the one token whose fallback is **empty rather than a word**. Every other names
+something a model has — a designer, a year — so a gap is worth marking; a variant is a thing a file
+either is or is not, and `otto-bismark-plain` says nothing `otto-bismark` does not. A marked file
+still says so even as the only copy owned, so the rule is per file and not "does this sculpt need
+disambiguating". `Sanitize` then trims a stray leading or trailing `-`, `_` or space, or
+`{sculpt}-{variant}` would leave the template showing through as a dangling dash.
 
 Rules the executor will not bend:
 

@@ -550,5 +550,71 @@ public class OrganizePlannerTests : IDisposable
         Assert.Equal(0, plan.Renames);
     }
 
+    /// <summary>Applies the classifier the way a scan would.</summary>
+    private async Task ClassifyAsync(int modelId)
+    {
+        await using var db = _factory.CreateDbContext();
+        var classifier = new VariantClassifier();
+        var model = await db.Models.Include(m => m.Files).SingleAsync(m => m.Id == modelId);
+        foreach (var file in model.Files) classifier.Apply(model, file);
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task An_unmarked_file_is_not_labelled_plain()
+    {
+        // "otto-bismark-plain" tells you nothing "otto-bismark" does not, and
+        // a suffix distinguishing a file from nothing is noise on every name
+        // in the library.
+        var id = await NewModel("Otto Bismark", "otto", "Otto Bismark.stl");
+        await _editor.SetDesignerAsync(id, "Logan Lalich");
+        await ClassifyAsync(id);
+
+        var plan = await Plan(new OrganizeRules
+        {
+            RenameFiles = true, FileTemplate = "{sculpt}-{variant}", FileCase = NameCase.Kebab,
+        });
+
+        Assert.Equal("otto-bismark.stl", Assert.Single(plan.Moves[0].Renames).To);
+    }
+
+    [Fact]
+    public async Task A_marked_file_says_so_even_as_the_only_copy_you_own()
+    {
+        // The variant is information about the file, not merely a way of
+        // telling it from a sibling. Owning only the hollowed cut does not
+        // make "hollowed" worth dropping.
+        var id = await NewModel("Wall", "wall", "UD-001-HOL-Wall.stl");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+        await ClassifyAsync(id);
+
+        var plan = await Plan(new OrganizeRules
+        {
+            RenameFiles = true, FileTemplate = "{sculpt}-{variant}", FileCase = NameCase.Kebab,
+        });
+
+        Assert.Contains("hollowed", Assert.Single(plan.Moves[0].Renames).To);
+    }
+
+    [Fact]
+    public async Task A_marked_and_an_unmarked_export_still_get_different_names()
+    {
+        // The suffix has to go only where it says nothing. Dropping it from
+        // both would collapse the pair and number one of them.
+        var id = await NewModel("Well", "well", "UD-015-SUP-Well.stl", "UD-015-Well.stl");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+        await ClassifyAsync(id);
+
+        var plan = await Plan(new OrganizeRules
+        {
+            RenameFiles = true, FileTemplate = "{sculpt}-{variant}", FileCase = NameCase.Kebab,
+        });
+        var names = plan.Moves.SelectMany(m => m.Renames).Select(r => r.To).ToList();
+
+        Assert.Equal(2, names.Count);
+        Assert.Equal(names.Count, names.Distinct().Count());
+        Assert.DoesNotContain(names, n => n.Contains("-2."));
+    }
+
     public void Dispose() => _conn.Dispose();
 }

@@ -232,6 +232,33 @@ public class PathTemplateTests
     }
 
     [Fact]
+    public void A_separator_with_nothing_beyond_it_is_trimmed()
+    {
+        // "{sculpt}-{variant}" on an unmarked file. The dash is the template
+        // showing through, not part of anyone's name.
+        Assert.Equal("Otto Bismark", PathTemplate.Render(
+            "{sculpt}-{variant}",
+            new Dictionary<string, string?> { ["sculpt"] = "Otto Bismark", ["variant"] = "" },
+            forFile: true));
+
+        Assert.Equal("Otto Bismark", PathTemplate.Render(
+            "{variant} {sculpt}",
+            new Dictionary<string, string?> { ["sculpt"] = "Otto Bismark", ["variant"] = "" },
+            forFile: true));
+    }
+
+    [Fact]
+    public void An_unmarked_variant_renders_as_nothing_rather_than_a_placeholder()
+    {
+        // Every other token names something a model has, so a gap is worth
+        // marking. A variant is a thing a file either is or is not.
+        Assert.Equal("Wall", PathTemplate.Render(
+            "{sculpt}-{variant}",
+            new Dictionary<string, string?> { ["sculpt"] = "Wall" },
+            forFile: true));
+    }
+
+    [Fact]
     public void Leave_as_written_renders_the_way_it_always_did()
     {
         Assert.Equal("Prusa Research/3DBenchy V2",

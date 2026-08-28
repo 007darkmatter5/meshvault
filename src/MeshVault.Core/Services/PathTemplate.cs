@@ -47,7 +47,13 @@ public static class PathTemplate
             "file"),
         new("index", "Its position among the model's files, from 1", "1"),
         new("kind", "Mesh, Cad, Image, Document and so on", "Other"),
-        new("variant", "Supported, Hollowed, No logo or Plain, read from the file's name", "Plain"),
+        // Alone among the tokens in falling back to nothing rather than to a
+        // word. The others name something every model has -- a designer, a
+        // year -- so a gap is worth marking. A variant is a thing a file
+        // either is or is not, and "otto-bismark-plain" tells you nothing
+        // "otto-bismark" does not. A file that is marked still says so, even
+        // when it is the only copy you own.
+        new("variant", "Supported, Hollowed or No logo — nothing at all if the file is unmarked", ""),
     ];
 
     /// <summary>
@@ -196,7 +202,17 @@ public static class PathTemplate
         // as "Model V2." can never be opened again by that name.
         text = text.TrimEnd('.', ' ');
 
-        if (text.Length > MaxSegmentLength) text = text[..MaxSegmentLength].TrimEnd('.', ' ');
+        // A separator with nothing on the far side of it. "{sculpt}-{variant}"
+        // on an unmarked file renders "Otto Bismark-", and the dash is the
+        // template showing through rather than part of anyone's name. Trimmed
+        // before the reserved-name check, which adds a leading underscore of
+        // its own.
+        text = text.Trim(' ', '-', '_');
+
+        if (text.Length > MaxSegmentLength)
+            text = text[..MaxSegmentLength].TrimEnd('.', ' ', '-', '_');
+
+        if (text.Length == 0) return "";
 
         var stem = text.Split('.')[0];
         if (ReservedNames.Contains(stem, StringComparer.OrdinalIgnoreCase)) text = "_" + text;
