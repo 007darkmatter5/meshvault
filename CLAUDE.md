@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 dotnet build                                  # whole solution
-dotnet test                                   # all 517 tests, ~6s
+dotnet test                                   # all 519 tests, ~6s
 dotnet run --project src/MeshVault.Web        # http://localhost:5082 in Development
 
 # One class, or one test
@@ -144,6 +144,12 @@ also leaves `LastScannedUtc` alone, or it would tell the startup scan the share 
 Nothing promotes a model out of it. A folder template never yields a path inside the inbox, so
 filing empties it as a side effect. `Inbox.Missing` blocks a model only for a **designer or tag** —
 the tokens whose fallback would be a lie. "Unfiled" standing in for a collection is simply true.
+
+Pruning stops at it. `OrganizeExecutor.PruneEmptyFolders` walks up removing emptied source folders,
+and once filing has done its job the inbox is always one of them -- so every successful organize
+used to end with the inbox deleted and the next download with nowhere to land. It is a floor to
+that walk exactly as the library root is, matched case-insensitively because the share may spell it
+differently from the setting. Husks *inside* the inbox are still cleared.
 
 ### Organizing
 

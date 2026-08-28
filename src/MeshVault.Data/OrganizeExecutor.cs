@@ -1,4 +1,5 @@
 using MeshVault.Core.Models;
+using MeshVault.Core.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -297,7 +298,7 @@ public class OrganizeExecutor(
         added += await RehomeStrandedAsync(db, library.Id, ct);
         removed = await RemoveEmptiedAsync(db, touchedSources, ct);
         await RefreshTotalsAsync(db, ct);
-        PruneEmptyFolders(root, sourceFolders, problems);
+        PruneEmptyFolders(root, sourceFolders, library.InboxPath, problems);
 
         // What an undo cannot give back, stored on the run so the page can say
         // so before anyone presses it rather than after.
@@ -662,9 +663,29 @@ public class OrganizeExecutor(
     /// in them — a stray file somebody put there by hand keeps its folder alive
     /// rather than being swept up with it.
     /// </remarks>
+    /// <summary>
+    /// Removes the husks a run leaves behind: source folders emptied of every
+    /// file they held.
+    /// </summary>
+    /// <remarks>
+    /// The inbox is not one of them. Filing empties it as a side effect --
+    /// that is the point of it -- but the inbox is a folder the user
+    /// configured and expects to keep dropping downloads into, not an
+    /// incidental husk. Tidying it away meant every successful organize ended
+    /// with the inbox gone and the next download having nowhere to land.
+    ///
+    /// Folders *inside* the inbox are still pruned. An emptied pack folder in
+    /// there is a husk like any other; it is only the inbox itself that has to
+    /// survive, so it is a floor to the walk in the same way the library root
+    /// is.
+    /// </remarks>
     private static void PruneEmptyFolders(
-        string root, HashSet<string> folders, List<string> problems)
+        string root, HashSet<string> folders, string? inboxPath, List<string> problems)
     {
+        var inbox = Inbox.Normalize(inboxPath) is { Length: > 0 } relativeInbox
+            ? Combine(root, relativeInbox)
+            : null;
+
         foreach (var relative in folders.OrderByDescending(f => f.Count(c => c == '/')).ThenByDescending(f => f))
         {
             var full = Combine(root, relative);
@@ -677,6 +698,7 @@ public class OrganizeExecutor(
                 var directory = new DirectoryInfo(full);
                 while (directory is not null
                        && directory.FullName.Length > root.Length
+                       && !IsInbox(directory.FullName, inbox)
                        && !directory.EnumerateFileSystemInfos().Any())
                 {
                     var parent = directory.Parent;
@@ -747,6 +769,21 @@ public class OrganizeExecutor(
     /// library. The last line of defence against a template or a name that
     /// climbs out with "..".
     /// </summary>
+    /// <summary>
+    /// Whether this is the library's inbox, which pruning stops at.
+    /// </summary>
+    /// <remarks>
+    /// Compared case-insensitively, as everywhere else paths are: a share that
+    /// spells it "Inbox" while the setting says "inbox" is the same folder, and
+    /// answering otherwise here deletes it.
+    /// </remarks>
+    private static bool IsInbox(string fullPath, string? inbox) =>
+        inbox is not null
+        && string.Equals(
+            Path.TrimEndingDirectorySeparator(fullPath),
+            Path.TrimEndingDirectorySeparator(inbox),
+            StringComparison.OrdinalIgnoreCase);
+
     private static string? Combine(string root, string relative)
     {
         var full = Path.GetFullPath(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)));

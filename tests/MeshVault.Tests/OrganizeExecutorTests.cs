@@ -117,6 +117,46 @@ public class OrganizeExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task Filing_everything_out_of_the_inbox_leaves_the_inbox_there()
+    {
+        // Emptying the inbox is what filing is for, and the husks inside it are
+        // rubbish worth clearing. The inbox itself is not: it is a folder the
+        // user configured and drops downloads into, and tidying it away meant
+        // every successful organize ended with nowhere to put the next one.
+        await NewModel("inbox/UD-Supported", "UD-001-SUP-Wall.stl");
+
+        var result = await Run();
+
+        Assert.True(result.Clean, string.Join("; ", result.Problems));
+        Assert.True(Exists("Dungeon Blocks/UD 001 Wall/UD-001-SUP-Wall.stl"));
+
+        // The husk goes, the inbox stays, and the inbox is empty.
+        Assert.False(Directory.Exists(Path.Combine(_root, "inbox", "UD-Supported")));
+        Assert.True(Directory.Exists(Path.Combine(_root, "inbox")));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(_root, "inbox")));
+    }
+
+    [Fact]
+    public async Task The_inbox_survives_being_spelled_differently_on_disk()
+    {
+        // The setting says "inbox" and the share may say "Inbox". Comparing
+        // those as different folders is how the protection would quietly fail
+        // on exactly the machines it matters on.
+        await using (var db = _factory.CreateDbContext())
+        {
+            (await db.Libraries.SingleAsync()).InboxPath = "InBox";
+            await db.SaveChangesAsync();
+        }
+
+        await NewModel("inbox/UD-Supported", "UD-001-SUP-Wall.stl");
+
+        var result = await Run();
+
+        Assert.True(result.Clean, string.Join("; ", result.Problems));
+        Assert.True(Directory.Exists(Path.Combine(_root, "inbox")));
+    }
+
+    [Fact]
     public async Task Separate_variant_folders_end_up_in_one_folder()
     {
         await NewModel("inbox/plain", "Wall.stl");
