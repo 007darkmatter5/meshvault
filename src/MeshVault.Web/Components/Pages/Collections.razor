@@ -60,6 +60,11 @@ else
                             View models
                         </MudButton>
                         <MudSpacer />
+                        <MudTooltip Text="Download every model in this collection">
+                            <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small"
+                                           Disabled="@(entry.Count == 0)"
+                                           OnClick="@(() => Download(entry.Collection))" />
+                        </MudTooltip>
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
                                        OnClick="@(() => Rename(entry.Collection))" />
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
@@ -103,6 +108,21 @@ else
             await LoadAsync();
             Snackbar.Add("Collection updated", Severity.Success);
         }
+    }
+
+    /// <summary>
+    /// Shows what the download would cost before it starts. The dialog's own
+    /// button is the link that starts it, so the bytes never touch the circuit.
+    /// </summary>
+    private async Task Download(Collection collection)
+    {
+        var parameters = new DialogParameters<CollectionDownloadDialog>
+        {
+            { x => x.CollectionId, collection.Id },
+            { x => x.Name, collection.Name },
+        };
+
+        await Dialogs.ShowAsync<CollectionDownloadDialog>("Download collection", parameters);
     }
 
     private async Task Delete(Collection collection, int count)

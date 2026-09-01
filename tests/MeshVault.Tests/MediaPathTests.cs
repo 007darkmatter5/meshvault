@@ -16,6 +16,9 @@ public class MediaPathTests
     [InlineData("/mesh/299")]
     [InlineData("/snapshot/8")]
     [InlineData("/THUMB/model/7")]
+    [InlineData("/download/file/15")]
+    [InlineData("/download/model/7")]
+    [InlineData("/download/collection/3")]
     public void Media_paths_are_recognised(string path)
     {
         Assert.True(MediaEndpoints.IsMediaPath(new PathString(path)));

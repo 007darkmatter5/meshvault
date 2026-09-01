@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 dotnet build                                  # whole solution
-dotnet test                                   # all 519 tests, ~6s
+dotnet test                                   # all 538 tests, ~6s
 dotnet run --project src/MeshVault.Web        # http://localhost:5082 in Development
 
 # One class, or one test
@@ -263,6 +263,41 @@ nothing about the library.
 They also **disable `IStatusCodePagesFeature`** per request. Left on, a 404 for a missing thumbnail
 re-executes through Blazor and answers an `<img>` tag with 21 KB of HTML, and a 404 from a POST
 becomes a content-type 400.
+
+### Downloads
+
+`/download/{file,model,sculpt,collection}` hands back the originals — a single file as it
+sits, the rest zipped on the way out. Plain minimal APIs and plain `<a href>` links in the UI:
+the only way to start a download from a circuit is to marshal the whole file through SignalR
+first, which for a 2 GB model means holding it in memory to hand it over.
+
+`DownloadCatalog` resolves what a download covers **before** a byte is written. Once the first
+chunk leaves, the status code is spent — "there is nothing here" has to be answerable while a
+404 is still possible, which is why an empty set is a 404 rather than an empty zip.
+
+- **An account, not `Policies.View`.** Public browsing hands a visitor a decimated, quantised
+  preview; this hands over the creator's file exactly as it was bought. The endpoint enforces
+  it; `ModelDetail.CanDownload` only keeps buttons off a page where they would 401.
+- **`AllowSynchronousIO` is required.** `ZipArchive` writes its headers and central directory
+  synchronously, and Kestrel forbids blocking writes to a response body by default. Without it
+  every archive download 500s — and no unit test catches it, because a `MemoryStream` allows
+  what a response body does not. Verified over real HTTP.
+- **`MinDataRate` is cleared per request.** Kestrel hangs up on a response below ~240 B/s. An
+  archive read off a 1.4 MB/s share for hours will dip under that, and losing an hour-old
+  download to a momentary pause defends against nothing.
+- `ArchiveThrottle` caps concurrent archives at 2, and the stream claims `ForegroundActivity` —
+  same scarce share, same reasoning as `ThumbnailService`.
+- **A grouped model downloads its whole group.** The detail page already shows four folders as
+  one thing, so fetching only the folder you arrived at hands back less than the page shows.
+  Collections expand groups for the same reason: Browse lists only `GroupPrimary`, so that is
+  the row that got added. `GetCollectionSizeAsync` must expand identically or the confirmation
+  dialog under-promises.
+- Entry paths keep a file's layout beneath its model folder; more than one model means a folder
+  each, named from `ModelEntry.Name`. Duplicates are numbered — zip permits two entries with one
+  name and most tools extract them over each other, quietly returning fewer files than asked for.
+- `ArchiveWriter` is split out from the endpoint so a test can open the zip again. A missing file
+  is skipped rather than thrown on: an archive short of a file beats a truncated one, which looks
+  identical and says less.
 
 ### Accounts
 

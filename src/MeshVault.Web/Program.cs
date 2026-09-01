@@ -117,6 +117,7 @@ builder.Services.AddScoped<VariantStore>();
 builder.Services.AddScoped<SculptNameRestorer>();
 
 builder.Services.AddScoped<ModelCatalog>();
+builder.Services.AddScoped<DownloadCatalog>();
 builder.Services.AddScoped<ModelEditor>();
 builder.Services.AddScoped<OrganizePlanner>();
 builder.Services.AddScoped<GroupPlanner>();
@@ -127,6 +128,7 @@ builder.Services.AddScoped<PaintStore>();
 builder.Services.AddSingleton<ScanService>();
 builder.Services.AddSingleton<OrganizeService>();
 builder.Services.AddSingleton<ForegroundActivity>();
+builder.Services.AddSingleton<ArchiveThrottle>();
 
 // Diagnostics: a bounded tail of warnings and errors, and a count of live
 // circuits, both read by /diagnostics.
@@ -198,6 +200,7 @@ app.UseAntiforgery();
 
 app.MapHealthEndpoint();
 app.MapMediaEndpoints();
+app.MapDownloadEndpoints();
 app.MapAccountEndpoints();
 app.MapDiagnosticsEndpoints();
 app.MapStaticAssets();

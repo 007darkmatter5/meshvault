@@ -22,7 +22,13 @@ public static class MediaEndpoints
     /// <summary>Refuse absurd uploads; a 400x300 PNG is a few tens of KB.</summary>
     private const int MaxSnapshotBytes = 4 * 1024 * 1024;
 
-    private static readonly string[] MediaPrefixes = ["/thumb", "/mesh", "/snapshot", "/photo"];
+    /// <summary>
+    /// Paths the browser fetches for itself rather than pages a person reads.
+    /// <c>/download</c> is one of these for the same reason as the rest: a
+    /// missing file has to answer a bare 404, not a page.
+    /// </summary>
+    private static readonly string[] MediaPrefixes =
+        ["/thumb", "/mesh", "/snapshot", "/photo", "/download"];
 
     /// <summary>
     /// Whether a request is for binary media rather than a page. Used to keep

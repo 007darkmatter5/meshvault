@@ -1,0 +1,84 @@
+@using MeshVault.Data
+@inject DownloadCatalog Downloads
+
+@*
+    Says what a collection download costs before one starts.
+
+    A collection is not a model: it can be a hundred models and tens of
+    gigabytes, and a zip streamed off a share this app measures at about
+    1.4 MB/s cannot be resumed if the browser gives up. A number and an estimate
+    here is the difference between a considered click and a four-hour transfer
+    that dies with the laptop lid.
+*@
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Download @Name</MudText>
+    </TitleContent>
+
+    <DialogContent>
+        @if (_size is null)
+        {
+            <MudSkeleton Height="80px" />
+        }
+        else if (_size.Files == 0)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">
+                This collection has no files to download yet.
+            </MudAlert>
+        }
+        else
+        {
+            <MudStack Spacing="3">
+                <MudText>
+                    <b>@_size.Models</b> model@(_size.Models == 1 ? "" : "s"),
+                    <b>@_size.Files</b> file@(_size.Files == 1 ? "" : "s"),
+                    <b>@Formats.Bytes(_size.TotalBytes)</b> before compression.
+                </MudText>
+
+                @if (_size.TotalBytes >= LargeDownload)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true">
+                        Large downloads are streamed as they are read, so the browser
+                        cannot show how far along it is and cannot pick the file back up
+                        if the connection drops. Keep this tab open until it finishes.
+                    </MudAlert>
+                }
+
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    Models grouped across folders bring their whole group, the same
+                    files their page shows.
+                </MudText>
+            </MudStack>
+        }
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="@(() => Dialog.Cancel())">Cancel</MudButton>
+        @* An anchor, not a handler: the bytes go to the browser directly rather
+           than through the circuit. Clicking starts the download and leaves the
+           page where it is. *@
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   StartIcon="@Icons.Material.Filled.Download"
+                   Disabled="@(_size is null || _size.Files == 0)"
+                   Href="@($"/download/collection/{CollectionId}")"
+                   OnClick="@(() => Dialog.Close(DialogResult.Ok(true)))">
+            Download
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    /// <summary>Above this, warn that the download cannot be resumed.</summary>
+    private const long LargeDownload = 2L * 1024 * 1024 * 1024;
+
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+
+    [Parameter] public int CollectionId { get; set; }
+    [Parameter] public string Name { get; set; } = "";
+
+    private DownloadSize? _size;
+
+    protected override async Task OnInitializedAsync() =>
+        _size = await Downloads.GetCollectionSizeAsync(CollectionId);
+}

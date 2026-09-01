@@ -119,6 +119,29 @@ before the first run.**
 
 ---
 
+## Getting files back out
+
+Every model page has a **Download** button, and there is a download icon on each file row and
+on each sculpt heading in the file table. A collection can be downloaded whole from the
+Collections page, which tells you how big it is before it starts.
+
+The sculpt-level one is the useful one day to day: a pack of ninety-eight minis is a single
+model, and printing one of them should not mean fetching all of it. That heading hands you
+every export of that one sculpt — supported, unsupported, hollowed — and nothing else. A model
+whose folders you have grouped brings the whole group, the same files its page shows you.
+
+Anything larger than one file arrives as a zip, built as it is sent rather than staged on disk
+first. Two consequences worth knowing: the browser cannot show how far along a large download
+is, and it cannot resume one that drops. A collection of tens of gigabytes over a slow share is
+a long, fragile transfer — the confirmation dialog says so. Single files are ordinary downloads
+and do resume.
+
+Downloads are read from the library share, which is usually the slowest thing in the system, so
+no more than two archives are built at once and the thumbnail worker stands aside while one is
+running.
+
+---
+
 ## Configuration
 
 Every setting can be supplied as an environment variable using `__` for nesting.
@@ -172,6 +195,10 @@ Read means read. A signed-out visitor gets Browse, the model pages, the 3D viewe
 designer list. They cannot change, rename, tag, favourite, upload or organise anything, and
 collections, favourites and paint racks belong to an account and stay hidden — as do
 Libraries, Accounts and Diagnostics.
+
+**Downloading always needs an account**, whichever way this setting is set. The viewer shows a
+visitor a reduced copy of a mesh; a download hands over the creator's file exactly as it came.
+Those are different things to leave open.
 
 Turn it on only if you are content for whoever can reach that address to see your whole
 library, **including your model notes**. If MeshVault is exposed to the internet rather than

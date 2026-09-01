@@ -69,6 +69,16 @@ else
                 @(_model.SourceSite ?? "Source")
             </MudButton>
         }
+        @if (CanDownload)
+        {
+            @* A plain link, not an OnClick. Handing a file back through the
+               circuit would mean holding all of it in memory first. *@
+            <MudTooltip Text="@($"Download every file as a zip ({Formats.Bytes(AllFiles.Sum(f => f.SizeBytes))})")">
+                <MudButton Href="@($"/download/model/{_model.Id}")" Size="Size.Small"
+                           Variant="Variant.Outlined"
+                           StartIcon="@Icons.Material.Filled.Download">Download</MudButton>
+            </MudTooltip>
+        }
         @if (_canEdit)
         {
             <MudTooltip Text="@(_card.IsFavorite ? "Remove from favorites" : "Add to favorites")">
@@ -137,16 +147,29 @@ else
                         <MudTh>Kind</MudTh>
                         <MudTh Style="text-align:right">Size</MudTh>
                         <MudTh>Modified</MudTh>
+                        <MudTh></MudTh>
                     </HeaderContent>
                     <GroupHeaderTemplate>
-                        <MudTh Class="mud-table-cell-custom-group" colspan="5">
-                            <MudText Typo="Typo.body2" Style="font-weight:600">@context.Key</MudText>
+                        <MudTh Class="mud-table-cell-custom-group" colspan="6">
+                            <div class="d-flex align-center gap-2">
+                                <MudText Typo="Typo.body2" Style="font-weight:600">@context.Key</MudText>
+                                @* One sculpt out of a pack of ninety-eight is the
+                                   ordinary thing to want. Only headings that name a
+                                   sculpt get this; the rest are file kinds. *@
+                                @if (CanDownload && SculptKeyFor(context.Key?.ToString()) is { } sculptKey)
+                                {
+                                    <MudTooltip Text="Download every export of this sculpt">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small"
+                                                       Href="@($"/download/sculpt/{_model.Id}?key={Uri.EscapeDataString(sculptKey)}")" />
+                                    </MudTooltip>
+                                }
+                            </div>
                         </MudTh>
                     </GroupHeaderTemplate>
                     <RowTemplate>
                         @if (_editingFileId == context.Id)
                         {
-                            <MudTd DataLabel="Sculpt" colspan="5">
+                            <MudTd DataLabel="Sculpt" colspan="6">
                                 <div class="d-flex flex-wrap align-center gap-2 py-2">
                                     <MudText Typo="Typo.caption" Class="mud-text-secondary"
                                              Style="font-family:ui-monospace,monospace;min-width:100%">
@@ -235,6 +258,15 @@ else
                                 <MudText Typo="Typo.caption" Class="mud-text-secondary">
                                     @context.ModifiedUtc.LocalDateTime.ToString("d MMM yyyy")
                                 </MudText>
+                            </MudTd>
+                            <MudTd Style="text-align:right">
+                                @if (CanDownload)
+                                {
+                                    <MudTooltip Text="@($"Download {context.FileName}")">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small"
+                                                       Href="@($"/download/file/{context.Id}")" />
+                                    </MudTooltip>
+                                }
                             </MudTd>
                         }
                     </RowTemplate>
@@ -623,6 +655,26 @@ else
 
     private static string FileGroupKey(ModelFile file) =>
         string.IsNullOrWhiteSpace(file.SculptName) ? file.Kind.ToString() : file.SculptName!;
+
+    /// <summary>
+    /// Whether to offer downloads. Signed in, which is a step up from what this
+    /// page needs: public browsing hands a visitor a decimated preview, and
+    /// handing over the creator's original file is a different thing to leave
+    /// open. The endpoint enforces this too — this only keeps the buttons off a
+    /// page where they would 401.
+    /// </summary>
+    private bool CanDownload => _canEdit;
+
+    /// <summary>
+    /// The sculpt key behind a file-table heading, or null when the heading is a
+    /// file kind rather than a sculpt. Sculpt keys are the lowercased name, so a
+    /// heading maps to exactly one.
+    /// </summary>
+    private string? SculptKeyFor(string? heading) =>
+        heading is null
+            ? null
+            : AllFiles.FirstOrDefault(
+                f => f.SculptKey is not null && FileGroupKey(f) == heading)?.SculptKey;
 
     /// <summary>
     /// The sculpts the browser viewer can render, each holding every export of
