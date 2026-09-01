@@ -275,6 +275,13 @@ first, which for a 2 GB model means holding it in memory to hand it over.
 chunk leaves, the status code is spent — "there is nothing here" has to be answerable while a
 404 is still possible, which is why an empty set is a 404 rather than an empty zip.
 
+- **Every download link needs `data-enhance-nav="false"`.** `blazor.web.js` turns on enhanced
+  navigation, which intercepts internal `<a>` clicks, `fetch`es the URL, and only on finding the
+  reply is not HTML falls back to a real navigation. So the archive is built and streamed
+  **twice**, and the save dialog waits out the whole wasted first copy. Measured over CDP on a
+  600 MB model: 2 requests, dialog after 12.62s, 32.87s total — against 1 request, 0.08s and
+  16.82s with the attribute. curl cannot see this, because enhanced navigation only exists
+  inside the page; it takes a real browser to catch it.
 - **An account, not `Policies.View`.** Public browsing hands a visitor a decimated, quantised
   preview; this hands over the creator's file exactly as it was bought. The endpoint enforces
   it; `ModelDetail.CanDownload` only keeps buttons off a page where they would 401.

@@ -57,11 +57,17 @@
         <MudButton OnClick="@(() => Dialog.Cancel())">Cancel</MudButton>
         @* An anchor, not a handler: the bytes go to the browser directly rather
            than through the circuit. Clicking starts the download and leaves the
-           page where it is. *@
+           page where it is.
+
+           data-enhance-nav="false" for the reason given in CLAUDE.md — without
+           it Blazor fetches the whole archive, throws it away on finding it is
+           not HTML, and downloads it a second time. It costs the most here, on
+           the largest download the app offers. *@
         <MudButton Color="Color.Primary" Variant="Variant.Filled"
                    StartIcon="@Icons.Material.Filled.Download"
                    Disabled="@(_size is null || _size.Files == 0)"
                    Href="@($"/download/collection/{CollectionId}")"
+                   data-enhance-nav="false"
                    OnClick="@(() => Dialog.Close(DialogResult.Ok(true)))">
             Download
         </MudButton>

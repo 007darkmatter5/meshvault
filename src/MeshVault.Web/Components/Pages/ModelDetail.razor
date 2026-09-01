@@ -72,10 +72,16 @@ else
         @if (CanDownload)
         {
             @* A plain link, not an OnClick. Handing a file back through the
-               circuit would mean holding all of it in memory first. *@
+               circuit would mean holding all of it in memory first.
+
+               data-enhance-nav="false" is load-bearing on every download link —
+               see Downloads in CLAUDE.md. Enhanced navigation fetches an
+               internal link, and only on seeing the reply is not HTML does it
+               fall back to a real navigation, so the archive is built and sent
+               twice and the save dialog waits out the wasted first copy. *@
             <MudTooltip Text="@($"Download every file as a zip ({Formats.Bytes(AllFiles.Sum(f => f.SizeBytes))})")">
                 <MudButton Href="@($"/download/model/{_model.Id}")" Size="Size.Small"
-                           Variant="Variant.Outlined"
+                           Variant="Variant.Outlined" data-enhance-nav="false"
                            StartIcon="@Icons.Material.Filled.Download">Download</MudButton>
             </MudTooltip>
         }
@@ -160,7 +166,8 @@ else
                                 {
                                     <MudTooltip Text="Download every export of this sculpt">
                                         <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small"
-                                                       Href="@($"/download/sculpt/{_model.Id}?key={Uri.EscapeDataString(sculptKey)}")" />
+                                                       Href="@($"/download/sculpt/{_model.Id}?key={Uri.EscapeDataString(sculptKey)}")"
+                                                       data-enhance-nav="false" />
                                     </MudTooltip>
                                 }
                             </div>
@@ -264,7 +271,8 @@ else
                                 {
                                     <MudTooltip Text="@($"Download {context.FileName}")">
                                         <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small"
-                                                       Href="@($"/download/file/{context.Id}")" />
+                                                       Href="@($"/download/file/{context.Id}")"
+                                                       data-enhance-nav="false" />
                                     </MudTooltip>
                                 }
                             </MudTd>
