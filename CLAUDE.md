@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 dotnet build                                  # whole solution
-dotnet test                                   # all 568 tests, ~6s
+dotnet test                                   # all 570 tests, ~5s
 dotnet run --project src/MeshVault.Web        # http://localhost:5082 in Development
 
 # One class, or one test
@@ -29,7 +29,15 @@ open, and the build fails with `MSB3021 ... being used by another process`:
 dotnet ef migrations add <Name> -p src/MeshVault.Data -s src/MeshVault.Web -o Migrations
 ```
 
-Migrations apply automatically at startup via `DatabaseInitializer`. When a migration drops a
+Migrations apply automatically at startup via `DatabaseInitializer`, and `DatabaseBackup` copies the
+database aside first whenever any are pending. **A failed backup stops the server**, deliberately:
+some migrations move rows rather than columns and cannot be undone, so starting anyway would apply
+one with no way back. A server that refuses to start with a clear reason is recoverable in a way a
+merged database is not. Copies land in `<DataPath>/backups/`, newest five kept, taken with
+`VACUUM INTO` rather than a file copy — SQLite holds recent writes in a `-wal` sidecar, so copying
+the `.db` alone can miss exactly the newest data.
+
+When a migration drops a
 column whose data must survive, hand-write the transfer SQL into the generated `Up()` **before**
 the `DropColumn` calls — see `DesignersCollectionsAndFavorites`, which moved `IsFavorite` into a
 per-user table and a `Designer` string into an entity without losing anything.

@@ -133,6 +133,57 @@ public class SharedCollectionsMigrationTests : IDisposable
         Assert.Equal("To Print", door.PrimaryCollection?.Name);
     }
 
+    [Fact]
+    public async Task A_copy_is_taken_before_a_migration_that_cannot_be_undone()
+    {
+        // SharedCollections merges two accounts' collections of one name onto a
+        // survivor, and nothing can un-merge them. These run unattended, at
+        // startup, on somebody's own server -- so the copy is the difference
+        // between an upgrade somebody regrets and one they cannot undo.
+        await MigrateToAsync(Before);
+        await SeedAsync();
+
+        var folder = Path.Combine(Path.GetTempPath(), $"mv-data-{Guid.NewGuid():N}");
+        string? backup;
+        try
+        {
+            await using (var db = NewDb())
+                backup = await DatabaseBackup.BeforeMigratingAsync(db, folder);
+
+            Assert.NotNull(backup);
+            Assert.True(File.Exists(backup));
+
+            // The copy is of the database as it stood *before* the merge, and
+            // holds what the merge is about to destroy: both "To Print" rows,
+            // each with its own owner.
+            await using var saved = new SqliteConnection($"Data Source={backup};Mode=ReadOnly");
+            await saved.OpenAsync();
+            await using var command = saved.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM Collections WHERE NormalizedName = 'to print'";
+
+            Assert.Equal(2L, await command.ExecuteScalarAsync());
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Nothing_is_copied_when_there_is_nothing_to_apply()
+    {
+        // Every ordinary restart. A copy per start would fill the data folder
+        // with identical databases and say nothing.
+        await MigrateToAsync();
+
+        var folder = Path.Combine(Path.GetTempPath(), $"mv-data-{Guid.NewGuid():N}");
+        await using var db = NewDb();
+
+        Assert.Null(await DatabaseBackup.BeforeMigratingAsync(db, folder));
+        Assert.False(Directory.Exists(folder));
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

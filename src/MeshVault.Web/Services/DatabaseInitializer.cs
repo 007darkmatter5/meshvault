@@ -21,10 +21,14 @@ public static class DatabaseInitializer
         var sp = scope.ServiceProvider;
 
         var db = sp.GetRequiredService<MeshVaultDbContext>();
-        await db.Database.MigrateAsync();
-
         var options = sp.GetRequiredService<IOptions<MeshVaultOptions>>().Value;
         var log = sp.GetRequiredService<ILogger<MeshVaultDbContext>>();
+
+        // Before the schema moves, not after. Some migrations move rows rather
+        // than columns and cannot be undone -- and these run unattended, at
+        // startup, on somebody's own server.
+        await DatabaseBackup.BeforeMigratingAsync(db, options.DataPath, log);
+        await db.Database.MigrateAsync();
 
         foreach (var configured in options.Libraries)
         {
