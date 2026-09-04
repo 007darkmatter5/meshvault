@@ -263,6 +263,14 @@ differently from the setting. Husks *inside* the inbox are still cleared.
 `OrganizePlanner` proposes; `OrganizeExecutor` applies; nothing else calls either. `AllowOrganize`
 is permission, not instruction, and is checked in the executor rather than only the page.
 
+**Applying settles the convention; previewing does not.** Saving is otherwise a deliberate button,
+and rightly so — trying a template to see what it would do is the main thing the page is for, and a
+preview that quietly overwrote the convention would make exploring cost something. But applying is
+not previewing. Left unsaved, the library stays configured as something other than what was just
+done to it, and the *next* plan proposes undoing the work: rename every file to
+`border--supported.stl`, come back, and find a saved single-dash template asking for
+`border-supported.stl` again. `Apply` therefore calls `SaveConventionAsync(announce: false)`.
+
 Every row carries `PlannedMove.Tokens` — what the folder template resolved, token by token. A
 rendered destination reads like any other, so "why did it choose that path" was unanswerable from
 the page; `TokenTrace` shows it under the path, marking a token that fell back rather than printing
