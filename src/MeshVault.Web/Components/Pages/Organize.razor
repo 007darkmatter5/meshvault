@@ -919,7 +919,7 @@ else
         : _chosen.Count == _actionable.Count ? true
         : null;
 
-    private void Apply()
+    private async Task Apply()
     {
         if (_plan is null || _library is null) return;
 
@@ -929,7 +929,21 @@ else
         if (plan.IsEmpty) return;
 
         if (!Organizer.TryStart(LibraryId, plan))
+        {
             Snackbar.Add("Already organizing this library.", Severity.Info);
+            return;
+        }
+
+        // Applying settles the convention, where previewing does not. Saving is
+        // deliberate elsewhere on this page for a good reason -- trying a
+        // template to see what it would do is the main thing this page is for,
+        // and a preview that quietly overwrote the convention would make
+        // exploring cost something. But applying is not previewing. It rewrote
+        // the library, and leaving the library configured as something else
+        // guarantees the next plan proposes undoing the work that was just
+        // done: rename every file to "border--supported.stl", then come back to
+        // a saved template that wants "border-supported.stl" again.
+        if (ConventionChanged) await SaveConventionAsync(announce: false);
     }
 
     private void Choose(int modelId, bool wanted)
@@ -1224,16 +1238,25 @@ else
         && _fileProblems.Count == 0
         && !string.IsNullOrWhiteSpace(_folderTemplate);
 
-    private async Task SaveConvention()
-    {
-        var rules = CurrentRules;
+    private Task SaveConvention() => SaveConventionAsync(announce: true);
 
-        await Editor.SetOrganizeRulesAsync(LibraryId, rules);
+    /// <summary>
+    /// Records what is on screen as this library's convention.
+    /// </summary>
+    /// <param name="announce">
+    /// False when applying, which says what it did in its own progress and
+    /// result. A second snackbar about a setting nobody pressed a button for
+    /// would read as something having gone wrong.
+    /// </param>
+    private async Task SaveConventionAsync(bool announce)
+    {
+        await Editor.SetOrganizeRulesAsync(LibraryId, CurrentRules);
 
         // Refreshed rather than assumed, so the button goes quiet only because
         // the stored value really did change.
         _library = (await Catalog.GetLibrariesAsync()).FirstOrDefault(l => l.Id == LibraryId);
-        Snackbar.Add("Saved as this library's naming convention", Severity.Success);
+
+        if (announce) Snackbar.Add("Saved as this library's naming convention", Severity.Success);
     }
 
     private async Task RevertConvention()
