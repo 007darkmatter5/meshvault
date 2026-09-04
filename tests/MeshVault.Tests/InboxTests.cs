@@ -173,7 +173,7 @@ public class InboxTests : IDisposable
                 .FirstAsync(m => m.RelativePath == "dnd/filed");
             model.Collections.Add(new Collection
             {
-                Name = "Terrain", NormalizedName = "terrain", OwnerId = "alice",
+                Name = "Terrain", NormalizedName = "terrain",
             });
             await db.SaveChangesAsync();
         }

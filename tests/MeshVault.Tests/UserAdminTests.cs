@@ -86,7 +86,7 @@ public class UserAdminTests : IDisposable
         {
             db.Libraries.Add(new Library { Name = "L", Path = "/l" });
             db.Models.Add(new ModelEntry { LibraryId = 1, Name = "M", RelativePath = "m" });
-            db.Collections.Add(new Collection { Name = "C", NormalizedName = "c", OwnerId = ownerId });
+            db.Collections.Add(new Collection { Name = "C", NormalizedName = "c" });
             await db.SaveChangesAsync();
             db.Favorites.Add(new ModelFavorite { ModelEntryId = 1, UserId = ownerId });
             await db.SaveChangesAsync();
@@ -97,7 +97,6 @@ public class UserAdminTests : IDisposable
         Assert.Equal(2, list.Count);
         var owner = list.Single(u => u.UserName == "owner");
         Assert.Equal(Roles.Admin, owner.Role);
-        Assert.Equal(1, owner.Collections);
         Assert.Equal(1, owner.Favorites);
         Assert.Equal(Roles.Member, list.Single(u => u.UserName == "member").Role);
     }
@@ -253,11 +252,12 @@ public class UserAdminTests : IDisposable
     }
 
     /// <summary>
-    /// Collections and favorites reference the owner by id, not a foreign key,
-    /// so deleting an account must take them too or they linger unreachable.
+    /// Favorites reference the owner by id, not a foreign key, so deleting an
+    /// account must take them too or they linger unreachable. Collections must
+    /// not go: they name folders on disk and belong to the library.
     /// </summary>
     [Fact]
-    public async Task Deleting_an_account_removes_its_collections_and_favorites()
+    public async Task Deleting_an_account_removes_its_favorites_and_leaves_the_collections()
     {
         var ownerId = await SeedOwnerAsync();
         var memberId = await AddMemberAsync();
@@ -266,8 +266,8 @@ public class UserAdminTests : IDisposable
         {
             db.Libraries.Add(new Library { Name = "L", Path = "/l" });
             db.Models.Add(new ModelEntry { LibraryId = 1, Name = "M", RelativePath = "m" });
-            db.Collections.Add(new Collection { Name = "Theirs", NormalizedName = "theirs", OwnerId = memberId });
-            db.Collections.Add(new Collection { Name = "Mine", NormalizedName = "mine", OwnerId = ownerId });
+            db.Collections.Add(new Collection { Name = "Theirs", NormalizedName = "theirs" });
+            db.Collections.Add(new Collection { Name = "Mine", NormalizedName = "mine" });
             await db.SaveChangesAsync();
             db.Favorites.Add(new ModelFavorite { ModelEntryId = 1, UserId = memberId });
             await db.SaveChangesAsync();
@@ -277,8 +277,10 @@ public class UserAdminTests : IDisposable
 
         await using (var db = NewDb())
         {
-            // Theirs is gone; the admin's own collection and the models remain.
-            Assert.Equal("Mine", (await db.Collections.SingleAsync()).Name);
+            // Both collections survive. Removing a member used to take every
+            // collection they had made, which now would re-file on disk
+            // everything those collections named.
+            Assert.Equal(2, await db.Collections.CountAsync());
             Assert.Equal(0, await db.Favorites.CountAsync());
             Assert.Equal(1, await db.Models.CountAsync());
         }

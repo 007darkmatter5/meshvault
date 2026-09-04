@@ -237,16 +237,19 @@ public class BulkEditTests : IDisposable
     }
 
     [Fact]
-    public async Task Another_persons_collection_is_left_alone()
+    public async Task A_collection_made_by_somebody_else_can_still_be_filled()
     {
+        // Collections belong to the library rather than to an account, so there
+        // is no "somebody else's collection" to refuse. This used to silently
+        // change nothing, which on a shared library read as a broken button.
         var a = await NewModel("a");
         var bob = new ModelEditor(_factory, new FakeUser("bob"));
-        var bobsList = await bob.CreateCollectionAsync("Bob's list");
+        var terrain = await bob.CreateCollectionAsync("Terrain");
 
-        var result = await _editor.ApplyBulkEditAsync([a], new BulkEdit { CollectionId = bobsList.Id });
+        var result = await _editor.ApplyBulkEditAsync([a], new BulkEdit { CollectionId = terrain.Id });
 
-        Assert.Equal(0, result.CollectionChanged);
-        Assert.Empty((await Load(a)).Collections);
+        Assert.Equal(1, result.CollectionChanged);
+        Assert.Equal("Terrain", Assert.Single((await Load(a)).Collections).Name);
     }
 
     [Fact]

@@ -195,7 +195,7 @@ public class DownloadCatalog(IDbContextFactory<MeshVaultDbContext> factory, ICur
     private async Task<string?> OwnedCollectionNameAsync(
         MeshVaultDbContext db, int collectionId, CancellationToken ct) =>
         await db.Collections.AsNoTracking()
-            .Where(c => c.Id == collectionId && c.OwnerId == user.UserId)
+            .Where(c => c.Id == collectionId)
             .Select(c => c.Name)
             .FirstOrDefaultAsync(ct);
 

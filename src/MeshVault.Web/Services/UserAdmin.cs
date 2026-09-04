@@ -12,7 +12,9 @@ public record UserSummary(
     string? Email,
     string Role,
     DateTimeOffset CreatedUtc,
-    int Collections,
+    // No collection count: collections are shared by the whole library rather
+    // than owned, so there is no per-account number to report and nothing an
+    // account takes with it when it goes. Favorites really are per-person.
     int Favorites,
     bool IsLockedOut);
 
@@ -40,11 +42,6 @@ public class UserAdmin(
             .Join(db.Roles, ur => ur.RoleId, r => r.Id, (ur, r) => new { ur.UserId, r.Name })
             .ToDictionaryAsync(x => x.UserId, x => x.Name ?? Roles.Member, ct);
 
-        var collections = await db.Collections.AsNoTracking()
-            .GroupBy(c => c.OwnerId)
-            .Select(g => new { OwnerId = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.OwnerId, x => x.Count, ct);
-
         var favorites = await db.Favorites.AsNoTracking()
             .GroupBy(f => f.UserId)
             .Select(g => new { UserId = g.Key, Count = g.Count() })
@@ -59,7 +56,6 @@ public class UserAdmin(
             u.Email,
             roleByUser.GetValueOrDefault(u.Id, Roles.Member),
             u.CreatedUtc,
-            collections.GetValueOrDefault(u.Id, 0),
             favorites.GetValueOrDefault(u.Id, 0),
             u.LockoutEnd is { } end && end > now)).ToList();
     }
@@ -215,11 +211,15 @@ public class UserAdmin(
         if (await IsOnlyAdminAsync(user, ct))
             return Fail("LastAdmin", "This is the only administrator, so it cannot be deleted.");
 
-        // Collections and favorites reference the owner by id rather than by a
-        // foreign key, so they would otherwise be left behind unreachable.
+        // Favorites reference the owner by id rather than by a foreign key, so
+        // they would otherwise be left behind unreachable.
+        //
+        // Collections are deliberately not touched. They used to go with the
+        // account that made them, which was right while they were private; now
+        // they name folders on disk and belong to the library, so deleting a
+        // member would have re-filed everything they had ever collected.
         await using (var db = await factory.CreateDbContextAsync(ct))
         {
-            await db.Collections.Where(c => c.OwnerId == userId).ExecuteDeleteAsync(ct);
             await db.Favorites.Where(f => f.UserId == userId).ExecuteDeleteAsync(ct);
         }
 

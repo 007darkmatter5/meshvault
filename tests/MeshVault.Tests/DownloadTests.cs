@@ -168,13 +168,17 @@ public class DownloadTests : IDisposable
     }
 
     [Fact]
-    public async Task Collections_belonging_to_someone_else_are_not_downloadable()
+    public async Task Any_account_can_download_any_collection()
     {
+        // Collections describe the library rather than an account, so whoever
+        // made one is not a reason to refuse anybody else the download. An
+        // account is still required -- that is what /download enforces -- but
+        // which account is no longer part of the answer.
         var model = AddModel("m", "M", PlaceFile("m/a.stl"));
-        var collectionId = AddCollection("Bobs list", "bob", model.Id);
+        var collectionId = AddCollection("Terrain", "bob", model.Id);
 
-        Assert.Null(await CatalogFor("alice").GetCollectionAsync(collectionId));
-        Assert.Null(await CatalogFor("alice").GetCollectionSizeAsync(collectionId));
+        Assert.NotNull(await CatalogFor("alice").GetCollectionAsync(collectionId));
+        Assert.NotNull(await CatalogFor("alice").GetCollectionSizeAsync(collectionId));
         Assert.NotNull(await CatalogFor("bob").GetCollectionAsync(collectionId));
     }
 
@@ -398,7 +402,6 @@ public class DownloadTests : IDisposable
         {
             Name = name,
             NormalizedName = name.ToLowerInvariant(),
-            OwnerId = ownerId,
             CreatedUtc = DateTimeOffset.UtcNow,
             Models = [.. db.Models.Where(m => modelIds.Contains(m.Id))],
         };
