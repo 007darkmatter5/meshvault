@@ -21,4 +21,10 @@
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- So a test can post a late progress report deliberately rather than
+         racing the thread pool for one. ScanService.Report stays internal. -->
+    <InternalsVisibleTo Include="MeshVault.Tests" />
+  </ItemGroup>
+
 </Project>

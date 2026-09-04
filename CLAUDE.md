@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 dotnet build                                  # whole solution
-dotnet test                                   # all 570 tests, ~5s
+dotnet test                                   # all 571 tests, ~6s
 dotnet run --project src/MeshVault.Web        # http://localhost:5082 in Development
 
 # One class, or one test
@@ -438,6 +438,11 @@ frames every model to fit, so a raw distance would put the camera inside a small
 
 - Clear "running" state **before** raising the completion event. Subscribers call `IsRunning()`
   while handling it, so announcing first leaves the UI stuck on "Scanning…" forever.
+- **Drop a progress report that outlives its run.** `Progress<T>` dispatches asynchronously, so one
+  queued moments before the end lands whenever the thread pool gets to it — sometimes after the
+  completion status. Overwriting "finished" with "still running" sticks, because no further event is
+  coming to correct it. `ScanService.Update` ignores a running status once `IsRunning` is false,
+  which is the other reason the flag is cleared first.
 - Invoke handlers one at a time; one dead circuit must not stop the rest being notified.
 - `ForegroundActivity` is the backpressure valve: the geometry endpoint claims it, and the
   thumbnail worker waits. Without it a model the user opened queues behind 32 background reads.
