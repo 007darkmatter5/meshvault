@@ -819,6 +819,62 @@ public class OrganizeExecutorTests : IDisposable
         Assert.Contains(result.Problems, p => p.Contains("changed since the run"));
     }
 
+    [Fact]
+    public async Task A_rescan_does_not_undo_what_organizing_wrote()
+    {
+        // Organizing destroys the evidence the classifier reads: the words in
+        // the name, and the folders standing above the file inside its model.
+        // Left unpinned, the next scan reads back a name the app wrote itself
+        // and downgrades the row -- which is the whole reason
+        // SculptNameRestorer had to exist.
+        var model = await NewModel("inbox/UD-Supported", "UD-001-SUP-Wall.stl");
+        var before = model.Files[0];
+        Assert.Equal("Supported", before.VariantLabel);
+        Assert.Equal("UD 001 Wall", before.SculptName);
+
+        var plan = await _planner.PlanAsync(1, new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{sculpt}",
+            RenameFiles = true, FileTemplate = "{sculpt}", FileCase = NameCase.Kebab,
+        });
+        Assert.True((await _executor.ApplyAsync(1, plan)).Clean);
+
+        // The name now says nothing about supports, and the "Supported" folder
+        // it sat in is gone. Reading it again is exactly what a scan does.
+        await using var db = _factory.CreateDbContext();
+        var entry = await db.Models.Include(m => m.Files).SingleAsync();
+        var file = entry.Files[0];
+
+        Assert.Equal("ud-001-wall.stl", file.FileName);
+        Assert.True(file.VariantSetByOrganize);
+
+        Assert.False(_classifier.Apply(entry, file));
+        Assert.Equal("Supported", file.VariantLabel);
+        Assert.Equal("UD 001 Wall", file.SculptName);
+    }
+
+    [Fact]
+    public async Task Asking_for_detection_back_clears_the_organize_pin()
+    {
+        // The pin is bookkeeping, not a decision anybody made, so it must never
+        // be the reason a person cannot get detection back.
+        await NewModel("inbox/UD-Supported", "UD-001-SUP-Wall.stl");
+        Assert.True((await Run()).Clean);
+
+        int id;
+        await using (var db = _factory.CreateDbContext())
+        {
+            var file = await db.Files.SingleAsync();
+            Assert.True(file.VariantSetByOrganize);
+            id = file.Id;
+        }
+
+        await new ModelEditor(_factory, new FakeUser()).ResetVariantAsync(id);
+
+        await using var after = _factory.CreateDbContext();
+        Assert.False((await after.Files.SingleAsync()).VariantSetByOrganize);
+    }
+
     public void Dispose()
     {
         _conn.Dispose();

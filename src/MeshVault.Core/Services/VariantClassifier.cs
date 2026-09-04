@@ -11,15 +11,19 @@ namespace MeshVault.Core.Services;
 /// <param name="Key">
 /// Normalised identity of the sculpt. Files sharing a key are the same thing
 /// exported differently, so they belong together rather than side by side.
+/// Null when the name says only which variant this is and never which mini.
 /// </param>
-/// <param name="DisplayName">The same name with its original casing, for headings.</param>
-/// <param name="Labels">Variant names found, best-ranked first.</param>
+/// <param name="DisplayName">
+/// The same name with its original casing, for headings. Null whenever
+/// <paramref name="Key"/> is.
+/// </param>
+/// <param name="Labels">Variant names found, alphabetically.</param>
 /// <param name="Rank">
 /// Combined <see cref="VariantDefinition.PreviewRank"/> of those labels. Zero
 /// for a plain export, which is what makes "show the cleanest copy" a sort.
 /// </param>
 public record VariantClassification(
-    string Key, string DisplayName, IReadOnlyList<string> Labels, int Rank)
+    string? Key, string? DisplayName, IReadOnlyList<string> Labels, int Rank)
 {
     /// <summary>The labels as one display string, or null when this is the plain export.</summary>
     public string? Label => Labels.Count == 0 ? null : string.Join(", ", Labels);
@@ -56,8 +60,12 @@ public class VariantClassifier
     /// <remarks>
     /// 2: card images are re-picked to avoid supported exports.
     /// 3: the vocabulary moved from a rules blob to curated definitions.
+    /// 4: a name that is nothing but variant words no longer borrows its
+    ///    folder's name, so files that used to key on "inbox" lose that key.
+    /// 5: several labels on one file are listed alphabetically rather than by
+    ///    rank, which changes the stored label and so every name built from it.
     /// </remarks>
-    public const int Version = 3;
+    public const int Version = 5;
 
     /// <summary>
     /// Rank given to a label with no definition behind it — today only a scale.
@@ -89,12 +97,7 @@ public class VariantClassifier
     /// Identifies <paramref name="pathWithinModel"/> — a file path relative to
     /// its model's own folder, such as "Supported/Goblin_A.stl".
     /// </summary>
-    /// <param name="modelName">
-    /// Falls back to this when the name carries nothing but variant words, as
-    /// "Goblin/supported.stl" does. Without it such a file would key on the
-    /// word "supported" and never meet its unsupported twin.
-    /// </param>
-    public VariantClassification Classify(string modelName, string pathWithinModel)
+    public VariantClassification Classify(string pathWithinModel)
     {
         var words = new List<Word>();
         foreach (var segment in SplitPath(pathWithinModel))
@@ -119,14 +122,33 @@ public class VariantClassifier
             i += length;
         }
 
-        found.Sort((a, b) => a.Rank.CompareTo(b.Rank));
+        // Alphabetical, so a name reads the same however the ranks are tuned.
+        // Ordering by rank meant "which copy looks best in the viewer" -- a
+        // display preference on a row the user owns -- also silently decided
+        // the order of words in every filename, so nudging one changed the
+        // other. The rank still decides which export is previewed; it is summed
+        // below and does not care what order the labels came in.
+        found.Sort((a, b) => string.Compare(a.Label, b.Label, StringComparison.OrdinalIgnoreCase));
 
-        var display = kept.Count > 0 ? string.Join(' ', kept) : modelName;
-        return new VariantClassification(
-            Normalize(display),
-            display.Trim(),
-            found.Select(f => f.Label).ToList(),
-            found.Sum(f => f.Rank));
+        var labels = found.Select(f => f.Label).ToList();
+        var rank = found.Sum(f => f.Rank);
+
+        // Nothing left once the variant words are taken out. "presupported.stl"
+        // says which flavour it is and never which mini, and the honest answer
+        // is that this file has no sculpt yet.
+        //
+        // It used to borrow the model's folder name, which reads well for
+        // "Goblin/supported.stl" and disastrously for anything dropped into a
+        // container -- a loose download in the inbox became a sculpt called
+        // "inbox", and "STLs/presupported.stl" a sculpt called "STLs". The
+        // folder is a sculpt often enough to be tempting and a container often
+        // enough to be wrong, and nothing here can tell which. An unnamed
+        // sculpt is a question somebody can answer; a wrongly named one is a
+        // mistake they have to spot first.
+        if (kept.Count == 0) return new VariantClassification(null, null, labels, rank);
+
+        var display = string.Join(' ', kept);
+        return new VariantClassification(Normalize(display), display.Trim(), labels, rank);
     }
 
     /// <summary>
@@ -140,21 +162,23 @@ public class VariantClassifier
     /// A file the user has set by hand is never touched. That is the whole
     /// point of the flag: detection guesses well but not always, and a
     /// correction that a rescan could undo is not a correction.
+    ///
+    /// Neither is one organizing has renamed or moved. That pass throws away
+    /// the evidence it is reading here -- the words in the name, and the
+    /// containing folders in the path -- so re-deriving afterwards means
+    /// reading the app's own handiwork back and getting a worse answer than it
+    /// started with. <see cref="ModelFile.VariantSetByOrganize"/> stops it.
     /// </remarks>
     public bool Apply(ModelEntry entry, ModelFile file)
     {
-        if (file.VariantSetByUser) return false;
+        if (file.VariantSetByUser || file.VariantSetByOrganize) return false;
 
         string? key = null, name = null, label = null;
         var rank = 0;
 
         if (file.Kind is FileKind.Mesh or FileKind.Cad)
         {
-            var fallback = string.IsNullOrWhiteSpace(entry.Name)
-                ? Path.GetFileNameWithoutExtension(file.FileName)
-                : entry.Name;
-
-            var read = Classify(fallback, WithinModel(entry.RelativePath, file.RelativePath));
+            var read = Classify(WithinModel(entry.RelativePath, file.RelativePath));
             (key, name, label, rank) = (read.Key, read.DisplayName, read.Label, read.Rank);
         }
 
