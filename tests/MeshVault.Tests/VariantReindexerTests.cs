@@ -33,7 +33,7 @@ public class VariantReindexerTests : IDisposable
 
     private VariantReindexer NewReindexer() =>
         new(Factory, _rules, new VariantStore(Factory), new SettingsStore(Factory),
-            NullLogger<VariantReindexer>.Instance);
+            new GroupReconciler(Factory), NullLogger<VariantReindexer>.Instance);
 
     private ModelFile Mesh(string name, ThumbnailState state = ThumbnailState.Ready, long size = 100) =>
         new()
