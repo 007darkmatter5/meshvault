@@ -8,6 +8,7 @@
 @inject VariantStore Variants
 @inject VariantReindexer Reindexer
 @inject GroupStore Groups
+@inject GroupReconciler GroupReconciler
 @inject AuthenticationStateProvider AuthState
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -104,13 +105,18 @@ else
             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" Class="ma-0">
                 @_members.Count folders
             </MudChip>
+            @* No "Ungroup" any more. Grouping is read from the files rather
+               than approved once, so breaking a group apart would only last
+               until the next scan put it back -- a button that undoes itself is
+               worse than none. What actually separates two of these is
+               correcting a sculpt, which is where the grouping comes from. *@
             <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                Exports of this sculpt kept in separate folders, shown together. Nothing was moved.
+                Separate folders holding the same sculpt, shown together. Nothing was moved
+                @if (_canEdit)
+                {
+                    <text>&mdash; correct a file's sculpt below to separate them.</text>
+                }
             </MudText>
-            @if (_canEdit)
-            {
-                <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="Ungroup">Ungroup</MudButton>
-            }
         </div>
     }
     else
@@ -141,6 +147,17 @@ else
                         }
                     </MudText>
                 </MudPaper>
+            }
+
+            @* Sculpts before files, because that is what somebody came here to
+               look at: which minis this folder holds, and which cut of each one
+               they own. The file table below is the same rows seen as bytes on
+               a disk, which is a different and rarer question. *@
+            @if (_sculpts.Count > 0 || _unnamed.Count > 0)
+            {
+                <SculptPanel ModelId="_model.Id" Sculpts="_sculpts" Unnamed="_unnamed"
+                             Variants="_variants" CanEdit="_canEdit"
+                             OnChanged="OnSculptsChanged" />
             }
 
             <MudPaper Outlined="true" Class="pa-4">
@@ -174,56 +191,6 @@ else
                         </MudTh>
                     </GroupHeaderTemplate>
                     <RowTemplate>
-                        @if (_editingFileId == context.Id)
-                        {
-                            <MudTd DataLabel="Sculpt" colspan="6">
-                                <div class="d-flex flex-wrap align-center gap-2 py-2">
-                                    <MudText Typo="Typo.caption" Class="mud-text-secondary"
-                                             Style="font-family:ui-monospace,monospace;min-width:100%">
-                                        @context.FileName
-                                    </MudText>
-
-                                    @* Free text as well as a pick: a sculpt that
-                                       exists nowhere yet has no entry to choose. *@
-                                    <MudAutocomplete T="string" @bind-Value="_sculptDraft"
-                                                     Label="Sculpt" Dense="true" Margin="Margin.Dense"
-                                                     Variant="Variant.Outlined" CoerceValue="true"
-                                                     SearchFunc="SearchSculpts" Style="min-width:240px"
-                                                     ResetValueOnEmptyText="false" />
-
-                                    <MudSelect T="string" MultiSelection="true"
-                                               SelectedValues="_labelDraft"
-                                               SelectedValuesChanged="OnLabelsChanged"
-                                               Label="Variant" Dense="true" Margin="Margin.Dense"
-                                               Variant="Variant.Outlined" Style="min-width:220px"
-                                               MultiSelectionTextFunc="LabelSummary">
-                                        @foreach (var definition in _variants.Where(d => !d.IsFiller))
-                                        {
-                                            <MudSelectItem T="string" Value="@definition.Name">
-                                                @definition.Name
-                                            </MudSelectItem>
-                                        }
-                                    </MudSelect>
-
-                                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
-                                               Disabled="@(_savingVariant || string.IsNullOrWhiteSpace(_sculptDraft))"
-                                               OnClick="@(() => SaveVariant(context))">Save</MudButton>
-                                    <MudButton Size="Size.Small" Variant="Variant.Text"
-                                               Disabled="_savingVariant"
-                                               OnClick="CancelVariantEdit">Cancel</MudButton>
-                                    @if (context.VariantSetByUser)
-                                    {
-                                        <MudButton Size="Size.Small" Variant="Variant.Text"
-                                                   Disabled="_savingVariant"
-                                                   OnClick="@(() => ResetVariant(context))">
-                                            Back to detected
-                                        </MudButton>
-                                    }
-                                </div>
-                            </MudTd>
-                        }
-                        else
-                        {
                             <MudTd DataLabel="Name">
                                 <MudTooltip Text="@context.RelativePath">
                                     <MudText Typo="Typo.caption" Style="font-family:ui-monospace,monospace">
@@ -244,12 +211,6 @@ else
                                                 <MudIcon Icon="@Icons.Material.Filled.PushPin" Size="Size.Small"
                                                          Class="mud-text-secondary" />
                                             </MudTooltip>
-                                        }
-                                        @if (_canEdit)
-                                        {
-                                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
-                                                           OnClick="@(() => StartVariantEdit(context))"
-                                                           title="Correct the sculpt or variant" />
                                         }
                                     </div>
                                 }
@@ -276,7 +237,6 @@ else
                                     </MudTooltip>
                                 }
                             </MudTd>
-                        }
                     </RowTemplate>
                 </MudTable>
             </MudPaper>
@@ -402,9 +362,54 @@ else
                     {
                         var collectionId = entry.Collection.Id;
                         var isMember = _model.Collections.Any(c => c.Id == collectionId);
-                        <MudCheckBox T="bool" Value="isMember" Dense="true" Size="Size.Small"
-                                     ValueChanged="@(v => SetCollection(collectionId, v))"
-                                     Label="@entry.Collection.Name" />
+                        var isPrimary = _model.PrimaryCollection?.Id == collectionId;
+
+                        <div class="d-flex align-center">
+                            <MudCheckBox T="bool" Value="isMember" Dense="true" Size="Size.Small"
+                                         ValueChanged="@(v => SetCollection(collectionId, v))"
+                                         Label="@entry.Collection.Name" Class="flex-grow-1" />
+
+                            @* Only where there is a choice to make. A model in
+                               one collection is filed under it whether or not a
+                               star says so, and a control that changes nothing
+                               invites somebody to press it and wonder. *@
+                            @if (isMember && _canEdit && _model.Collections.Count > 1)
+                            {
+                                <MudTooltip Text="@(isPrimary
+                                    ? "Names this model's folder. Click to stop filing it by collection."
+                                    : $"File this model under {entry.Collection.Name}")">
+                                    <MudIconButton Size="Size.Small"
+                                                   Icon="@(isPrimary
+                                                       ? Icons.Material.Filled.Star
+                                                       : Icons.Material.Filled.StarBorder)"
+                                                   Color="@(isPrimary ? Color.Warning : Color.Default)"
+                                                   OnClick="@(() => SetPrimaryCollection(isPrimary ? null : collectionId))" />
+                                </MudTooltip>
+                            }
+                        </div>
+                    }
+
+                    @* A model lives in one folder and can be in any number of
+                       collections, so the star is the whole answer to which one
+                       names it. Said out loud, because otherwise the only place
+                       the consequence shows up is a destination path on the
+                       organize page. *@
+                    @if (_model.Collections.Count > 1)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+                            @if (_model.PrimaryCollection is { } primary)
+                            {
+                                <text>Filed under <strong>@primary.Name</strong> where your folder
+                                template uses <code>{collection}</code>.</text>
+                            }
+                            else
+                            {
+                                <text>
+                                    No collection starred, so <code>{collection}</code> is left out
+                                    of this model's folder entirely. Star one to file it.
+                                </text>
+                            }
+                        </MudText>
                     }
                 }
                 @if (_newCollection is not null)
@@ -562,93 +567,26 @@ else
         Nav.NavigateTo("/browse");
     }
 
-    private async Task Ungroup()
-    {
-        await Groups.UngroupAsync(_model!.LibraryId, _model.GroupKey!);
-        await LoadAsync();
-        Snackbar.Add("Ungrouped. Each folder stands on its own again.", Severity.Success);
-    }
-
     private List<VariantDefinition> _variants = [];
-    private int _editingFileId;
-    private string _sculptDraft = "";
-    private IReadOnlyCollection<string> _labelDraft = [];
-    private bool _savingVariant;
-
-    private void StartVariantEdit(ModelFile file)
-    {
-        _editingFileId = file.Id;
-        _sculptDraft = file.SculptName ?? Path.GetFileNameWithoutExtension(file.FileName);
-        _labelDraft = file.VariantLabel?
-            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-            ?? [];
-    }
-
-    private void CancelVariantEdit() => _editingFileId = 0;
-
-    private void OnLabelsChanged(IReadOnlyCollection<string> picked) => _labelDraft = picked;
-
-    /// <summary>What the closed variant picker reads. No labels means the plain export.</summary>
-    private static string LabelSummary(IReadOnlyList<string> picked) =>
-        picked.Count == 0 ? "Plain" : string.Join(", ", picked);
 
     /// <summary>
-    /// Sculpt names already in this model, so correcting a stray file is a pick
-    /// rather than an exercise in retyping a name exactly.
+    /// Meshes carrying no sculpt, which the planner will not file.
     /// </summary>
-    private Task<IEnumerable<string>> SearchSculpts(string? value, CancellationToken ct)
+    /// <remarks>
+    /// Kept beside the sculpts rather than buried in the file table, because
+    /// the only place their absence otherwise shows up is organizing refusing
+    /// to move them, one page away and with nothing to act on.
+    /// </remarks>
+    private List<ModelFile> _unnamed = [];
+
+    /// <summary>
+    /// Reloads after the sculpt panel has changed something, and settles the
+    /// grouping that change may have made or broken.
+    /// </summary>
+    private async Task OnSculptsChanged()
     {
-        var names = AllFiles
-            .Select(f => f.SculptName)
-            .Where(n => !string.IsNullOrWhiteSpace(n))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-            .Select(n => n!);
-
-        if (!string.IsNullOrWhiteSpace(value))
-            names = names.Where(n => n.Contains(value, StringComparison.OrdinalIgnoreCase));
-
-        return Task.FromResult(names.Take(20));
-    }
-
-    private async Task SaveVariant(ModelFile file)
-    {
-        _savingVariant = true;
-        try
-        {
-            var chosen = _variants.Where(d => _labelDraft.Contains(d.Name)).ToList();
-            await Editor.SetVariantAsync(file.Id, _sculptDraft, chosen);
-
-            _editingFileId = 0;
-            await LoadAsync();
-            Snackbar.Add($"{file.FileName} moved to {_sculptDraft}", Severity.Success);
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Could not save that: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _savingVariant = false;
-        }
-    }
-
-    private async Task ResetVariant(ModelFile file)
-    {
-        _savingVariant = true;
-        try
-        {
-            await Editor.ResetVariantAsync(file.Id);
-            await Reindexer.ReclassifyModelAsync(_model!.Id);
-
-            _editingFileId = 0;
-            await LoadAsync();
-            Snackbar.Add($"{file.FileName} handed back to detection", Severity.Success);
-        }
-        finally
-        {
-            _savingVariant = false;
-        }
+        await GroupReconciler.ReconcileAsync(_model!.LibraryId);
+        await LoadAsync();
     }
 
     /// <summary>
@@ -763,7 +701,13 @@ else
         // Worked out once per load rather than per render: a pack of two hundred
         // files would regroup itself on every keystroke in the notes box.
         _members = await Catalog.GetGroupMembersAsync(Id);
-        _sculpts = VariantGrouper.Group(AllFiles.Where(f => MeshLoader.CanRead(f.Extension)));
+        _sculpts = VariantGrouper.Group(
+            AllFiles.Where(f => MeshLoader.CanRead(f.Extension) && f.SculptKey is not null));
+
+        _unnamed = AllFiles
+            .Where(f => f.Kind is FileKind.Mesh or FileKind.Cad && f.SculptKey is null)
+            .OrderBy(f => f.FileName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
         _variants = await Variants.GetAsync();
 
         _notes = _originalNotes = _model.Notes ?? "";
@@ -911,6 +855,14 @@ else
     {
         if (_model is null) return;
         await Editor.SetCollectionMembershipAsync(_model.Id, collectionId, member);
+        await LoadAsync();
+    }
+
+    /// <summary>Stars the collection that names this model's folder, or clears it.</summary>
+    private async Task SetPrimaryCollection(int? collectionId)
+    {
+        if (_model is null) return;
+        await Editor.SetPrimaryCollectionAsync(_model.Id, collectionId);
         await LoadAsync();
     }
 

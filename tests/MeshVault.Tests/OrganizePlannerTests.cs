@@ -62,7 +62,10 @@ public class OrganizePlannerTests : IDisposable
                 RelativePath = $"{relativePath}/{file}",
                 FileName = file,
                 Extension = Path.GetExtension(file),
-                Kind = FileKind.Mesh,
+                // Read from the extension, not assumed. Calling every file a
+                // mesh made a readme its own sculpt, which is a shape the app
+                // never produces and would have hidden the real behaviour here.
+                Kind = FileKinds.FromExtension(Path.GetExtension(file)),
                 ModifiedUtc = DateTimeOffset.UtcNow,
             });
         }
@@ -72,8 +75,25 @@ public class OrganizePlannerTests : IDisposable
         return model.Id;
     }
 
+    /// <summary>
+    /// Plans with a folder per model, unless the test chose its own template.
+    /// </summary>
+    /// <remarks>
+    /// Nearly everything below was written when a folder per model was what the
+    /// app shipped. The default is a folder per sculpt now, which asks a
+    /// different question of each of them -- so the old shape is pinned here
+    /// rather than inherited, where changing what ships would quietly rewrite
+    /// thirteen tests into testing something else.
+    ///
+    /// <see cref="The_shipped_default_files_a_pack_by_sculpt"/> covers the
+    /// default itself, and goes to the planner directly so that this cannot
+    /// stand in front of it.
+    /// </remarks>
     private Task<OrganizePlan> Plan(OrganizeRules? rules = null) =>
-        _planner.PlanAsync(1, rules ?? new OrganizeRules());
+        _planner.PlanAsync(1, rules ?? new OrganizeRules { FolderTemplate = PerModel });
+
+    /// <summary>The shape most of these tests were written against.</summary>
+    private const string PerModel = "{designer}/{model}";
 
     [Fact]
     public async Task A_model_is_planned_into_its_designer_folder()
@@ -179,7 +199,7 @@ public class OrganizePlannerTests : IDisposable
         var id = await NewModel("Dragon", "dragon", "weird name.stl");
         await _editor.SetDesignerAsync(id, "Cinderwing3D");
 
-        var plan = await Plan(new OrganizeRules { RenameFiles = true, FileTemplate = "{model}" });
+        var plan = await Plan(new OrganizeRules { FolderTemplate = PerModel, RenameFiles = true, FileTemplate = "{model}" });
 
         Assert.Equal("Dragon.stl", Assert.Single(plan.Moves[0].Renames).To);
     }
@@ -190,7 +210,7 @@ public class OrganizePlannerTests : IDisposable
         var id = await NewModel("Dragon", "dragon", "presupported.stl");
         await _editor.SetDesignerAsync(id, "Cinderwing3D");
 
-        var plan = await Plan(new OrganizeRules { RenameFiles = true });
+        var plan = await Plan(new OrganizeRules { FolderTemplate = PerModel, RenameFiles = true });
 
         Assert.Equal("Dragon - presupported.stl", Assert.Single(plan.Moves[0].Renames).To);
     }
@@ -203,7 +223,7 @@ public class OrganizePlannerTests : IDisposable
         var id = await NewModel("Dragon", "dragon", "a.stl", "b.stl");
         await _editor.SetDesignerAsync(id, "Cinderwing3D");
 
-        var plan = await Plan(new OrganizeRules { RenameFiles = true, FileTemplate = "{model}" });
+        var plan = await Plan(new OrganizeRules { FolderTemplate = PerModel, RenameFiles = true, FileTemplate = "{model}" });
         var names = plan.Moves[0].Renames.Select(r => r.To).ToList();
 
         Assert.Equal(2, names.Count);
@@ -217,7 +237,7 @@ public class OrganizePlannerTests : IDisposable
         var id = await NewModel("Dragon", "dragon", "Dragon.stl");
         await _editor.SetDesignerAsync(id, "Cinderwing3D");
 
-        var plan = await Plan(new OrganizeRules { RenameFiles = true, FileTemplate = "{model}" });
+        var plan = await Plan(new OrganizeRules { FolderTemplate = PerModel, RenameFiles = true, FileTemplate = "{model}" });
 
         Assert.Empty(plan.Moves[0].Renames);
     }
@@ -334,6 +354,7 @@ public class OrganizePlannerTests : IDisposable
 
         var plan = await Plan(new OrganizeRules
         {
+            FolderTemplate = PerModel,
             RenameFiles = true,
             FolderCase = NameCase.Pascal,
             FileCase = NameCase.Kebab,
@@ -353,6 +374,7 @@ public class OrganizePlannerTests : IDisposable
 
         var plan = await Plan(new OrganizeRules
         {
+            FolderTemplate = PerModel,
             RenameFiles = true, FileTemplate = "{model}", FileCase = NameCase.Kebab,
         });
 
@@ -369,6 +391,7 @@ public class OrganizePlannerTests : IDisposable
 
         var plan = await Plan(new OrganizeRules
         {
+            FolderTemplate = PerModel,
             RenameFiles = true, FileTemplate = "{model}", FileCase = NameCase.Kebab,
         });
         var names = plan.Moves[0].Renames.Select(r => r.To).ToList();
@@ -383,7 +406,7 @@ public class OrganizePlannerTests : IDisposable
         var id = await NewModel("Spring Dragon", "dragon", "Wall 01.stl");
         await _editor.SetDesignerAsync(id, "Cinderwing3D");
 
-        var plan = await Plan(new OrganizeRules { RenameFiles = true });
+        var plan = await Plan(new OrganizeRules { FolderTemplate = PerModel, RenameFiles = true });
 
         Assert.Equal("Cinderwing3D/Spring Dragon", plan.Moves[0].To);
         Assert.Equal("Spring Dragon - Wall 01.stl", Assert.Single(plan.Moves[0].Renames).To);
@@ -409,6 +432,7 @@ public class OrganizePlannerTests : IDisposable
 
         var plan = await Plan(new OrganizeRules
         {
+            FolderTemplate = PerModel,
             RenameFiles = true, FileTemplate = "{model} - {variant}",
         });
         var names = plan.Moves.SelectMany(m => m.Renames).Select(r => r.To).ToList();
@@ -435,6 +459,7 @@ public class OrganizePlannerTests : IDisposable
 
         var plan = await Plan(new OrganizeRules
         {
+            FolderTemplate = PerModel,
             RenameFiles = true, FileTemplate = "{sculpt}",
         });
         var names = plan.Moves.SelectMany(m => m.Renames).Select(r => r.To).ToList();
@@ -470,6 +495,7 @@ public class OrganizePlannerTests : IDisposable
 
         var plan = await Plan(new OrganizeRules
         {
+            FolderTemplate = PerModel,
             RenameFiles = true, FileTemplate = "{model}-{variant}", FileCase = NameCase.Kebab,
         });
         var names = plan.Moves.SelectMany(m => m.Renames).Select(r => r.To).ToList();
@@ -572,6 +598,7 @@ public class OrganizePlannerTests : IDisposable
 
         var plan = await Plan(new OrganizeRules
         {
+            FolderTemplate = PerModel,
             RenameFiles = true, FileTemplate = "{sculpt}-{variant}", FileCase = NameCase.Kebab,
         });
 
@@ -590,6 +617,7 @@ public class OrganizePlannerTests : IDisposable
 
         var plan = await Plan(new OrganizeRules
         {
+            FolderTemplate = PerModel,
             RenameFiles = true, FileTemplate = "{sculpt}-{variant}", FileCase = NameCase.Kebab,
         });
 
@@ -607,6 +635,7 @@ public class OrganizePlannerTests : IDisposable
 
         var plan = await Plan(new OrganizeRules
         {
+            FolderTemplate = PerModel,
             RenameFiles = true, FileTemplate = "{sculpt}-{variant}", FileCase = NameCase.Kebab,
         });
         var names = plan.Moves.SelectMany(m => m.Renames).Select(r => r.To).ToList();
@@ -726,6 +755,7 @@ public class OrganizePlannerTests : IDisposable
 
         var plan = await Plan(new OrganizeRules
         {
+            FolderTemplate = PerModel,
             RenameFiles = true, FileTemplate = "{model}", FileCase = NameCase.Kebab,
         });
 
@@ -746,11 +776,332 @@ public class OrganizePlannerTests : IDisposable
 
         var plan = await Plan(new OrganizeRules
         {
+            FolderTemplate = PerModel,
             RenameFiles = true, FileTemplate = "{model}", FileCase = NameCase.Kebab,
         });
 
         Assert.Equal(2, plan.Numberings.Count);
         Assert.Equal(("variant", 2), Assert.Single(plan.NumberingFixes));
+    }
+
+    [Fact]
+    public async Task A_mesh_whose_name_says_only_its_variant_is_not_filed_under_a_placeholder()
+    {
+        // The shape the inbox bug arrived in. "presupported.stl" names a
+        // flavour and never a mini, and {sculpt} used to render its "Unsorted"
+        // placeholder for it -- shelving real work somewhere that reads as
+        // filed. Worse, the sculpt name was borrowed from the containing
+        // folder, so a loose download landed under a mini called "inbox".
+        var id = await NewModel("inbox", "inbox", "presupported.stl");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+        await ClassifyAsync(id);
+
+        var plan = await Plan(new OrganizeRules { FolderTemplate = "{designer}/{sculpt}" });
+        var move = Assert.Single(plan.Moves);
+
+        Assert.Equal(MoveOutcome.Incomplete, move.Outcome);
+        Assert.Contains("presupported.stl", move.Problem);
+        Assert.DoesNotContain(plan.Moves, m => m.To.Contains("Unsorted", StringComparison.Ordinal));
+        Assert.DoesNotContain(plan.Moves, m => m.To.Contains("inbox", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task A_named_mini_beside_an_unnamed_one_is_still_filed()
+    {
+        // Holding back the whole folder because one file needs a name would
+        // punish the ninety-seven that do not. The unnamed one stays exactly
+        // where it is, and says so.
+        var id = await NewModel("Pack", "pack", "UD-001-Wall.stl", "presupported.stl");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+        await ClassifyAsync(id);
+
+        var plan = await Plan(new OrganizeRules { FolderTemplate = "{designer}/{sculpt}" });
+
+        Assert.Contains(plan.Moves, m => m.To == "Dungeon Blocks/UD 001 Wall");
+        Assert.Contains(plan.Moves, m => m.Outcome == MoveOutcome.Incomplete);
+
+        // And it does not hitch a ride as an orphan of the mini that did file.
+        var filed = plan.Moves.Single(m => m.Outcome != MoveOutcome.Incomplete);
+        var carried = await FileNamesAsync(filed.FileIds);
+        Assert.DoesNotContain("presupported.stl", carried);
+    }
+
+    [Fact]
+    public async Task The_plan_says_which_token_produced_which_part_of_a_path()
+    {
+        // "Can't tell why it chose that path" was the complaint, and the page
+        // genuinely could not answer it: a rendered destination looks the same
+        // whichever token filled each segment.
+        var id = await NewModel("Wall", "wall", "UD-001-Wall.stl");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+        await ClassifyAsync(id);
+
+        var move = Assert.Single(await Plan(new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{collection}/{sculpt}",
+        }) is var plan ? plan.Moves : []);
+
+        Assert.Equal(
+            [("designer", "Dungeon Blocks"), ("collection", null), ("sculpt", "UD 001 Wall")],
+            move.Tokens.Select(t => (t.Name, t.Value)));
+    }
+
+    [Fact]
+    public async Task A_model_files_under_the_collection_it_has_starred()
+    {
+        // Not the first alphabetically, which is what this used to be. "Archive"
+        // beats "The Ultimate Dungeon" on the alphabet and is plainly not the
+        // one anybody organises by.
+        var id = await NewModel("Wall", "wall", "wall.stl");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+
+        var dungeon = await _editor.CreateCollectionAsync("The Ultimate Dungeon");
+        var archive = await _editor.CreateCollectionAsync("Archive");
+        await _editor.SetCollectionMembershipAsync(id, dungeon.Id, true);
+        await _editor.SetCollectionMembershipAsync(id, archive.Id, true);
+
+        var move = Assert.Single((await Plan(new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{collection}/{model}",
+        })).Moves);
+
+        Assert.Equal("Dungeon Blocks/The Ultimate Dungeon/Wall", move.To);
+    }
+
+    [Fact]
+    public async Task A_model_in_no_collection_loses_the_level_rather_than_gaining_Unfiled()
+    {
+        // Most of a library is in no collection, and shelving all of it under a
+        // folder named after an absence is worse than not having the level.
+        var id = await NewModel("Wall", "wall", "wall.stl");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+
+        var move = Assert.Single((await Plan(new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{collection}/{model}",
+        })).Moves);
+
+        Assert.Equal("Dungeon Blocks/Wall", move.To);
+    }
+
+    [Fact]
+    public async Task A_model_with_several_collections_and_no_star_loses_the_level_too()
+    {
+        // Unstarring is how a model opts out of being filed by collection, so
+        // it has to land where an uncollected one does rather than guessing.
+        var id = await NewModel("Wall", "wall", "wall.stl");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+
+        var dungeon = await _editor.CreateCollectionAsync("The Ultimate Dungeon");
+        var archive = await _editor.CreateCollectionAsync("Archive");
+        await _editor.SetCollectionMembershipAsync(id, dungeon.Id, true);
+        await _editor.SetCollectionMembershipAsync(id, archive.Id, true);
+        await _editor.SetPrimaryCollectionAsync(id, null);
+
+        var move = Assert.Single((await Plan(new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{collection}/{model}",
+        })).Moves);
+
+        Assert.Equal("Dungeon Blocks/Wall", move.To);
+    }
+
+    [Fact]
+    public async Task The_shipped_default_files_a_pack_by_sculpt()
+    {
+        // The default used to be {designer}/{model}, which has no {sculpt} in
+        // it -- so a library that had never had a template chosen never split a
+        // pack at all. A folder called "Orc Warband" holding three minis stayed
+        // one folder called "Orc Warband", which is the exact shape organizing
+        // exists to undo.
+        var id = await NewModel("Orc Warband", "Orc Warband",
+            "orc-chief.stl", "orc-grunt.stl", "orc-grunt-supported.stl", "orc-shaman.stl");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+        await ClassifyAsync(id);
+
+        var warband = await _editor.CreateCollectionAsync("Orc Warband");
+        await _editor.SetCollectionMembershipAsync(id, warband.Id, true);
+
+        // No rules passed: this is what a library with no template chosen gets.
+        var plan = await _planner.PlanAsync(1, new OrganizeRules());
+
+        Assert.Equal(
+            [
+                "Dungeon Blocks/Orc Warband/orc chief",
+                "Dungeon Blocks/Orc Warband/orc grunt",
+                "Dungeon Blocks/Orc Warband/orc shaman",
+            ],
+            plan.Moves.Select(m => m.To).Order());
+    }
+
+    [Fact]
+    public async Task A_rebuilt_name_separates_the_sculpt_from_its_variants()
+    {
+        // "wall-no-logo" cannot say whether the sculpt is "Wall" or "Wall No".
+        // Two dashes can, and they have to survive the casing pass, which
+        // treats every other non-alphanumeric character as a word break.
+        var id = await NewModel("Wall", "wall",
+            "UD-001-Wall.stl", "UD-001-SUP-Wall-NL.stl", "UD-001-HOL-SUP-Wall.stl");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+        await ClassifyAsync(id);
+
+        var plan = await Plan(new OrganizeRules
+        {
+            FolderTemplate = PerModel,
+            RenameFiles = true,
+            FileTemplate = $"{{sculpt}}{NameCasing.VariantSeparator}{{variant}}",
+            FileCase = NameCase.Kebab,
+        });
+
+        Assert.Equal(
+            [
+                // Alphabetical, not by rank, so tuning which export previews
+                // best cannot reorder the words in a filename.
+                "ud-001-wall--hollowed-supported.stl",
+                "ud-001-wall--no-logo-supported.stl",
+
+                // No variants, so no dangling separator: Sanitize trims it.
+                "ud-001-wall.stl",
+            ],
+            plan.Moves.SelectMany(m => m.Renames).Select(r => r.To).Order());
+    }
+
+    [Fact]
+    public async Task Rebuilt_names_keep_the_separator_under_snake_case()
+    {
+        // The reason for two dashes rather than the underscore that reads more
+        // naturally: snake_case spends underscores on every word break, so a
+        // single one would vanish into the name it was meant to divide.
+        var id = await NewModel("Wall", "wall", "UD-001-HOL-Wall.stl");
+        await ClassifyAsync(id);
+
+        var plan = await Plan(new OrganizeRules
+        {
+            FolderTemplate = PerModel,
+            RenameFiles = true,
+            FileTemplate = $"{{sculpt}}{NameCasing.VariantSeparator}{{variant}}",
+            FileCase = NameCase.Snake,
+        });
+
+        Assert.Equal("ud_001_wall--hollowed.stl",
+            Assert.Single(plan.Moves.SelectMany(m => m.Renames)).To);
+    }
+
+    [Fact]
+    public async Task Two_folders_of_one_sculpt_say_which_cut_each_is_carrying()
+    {
+        // Both rows are the same sculpt heading for nearly the same path, so
+        // the destination alone cannot tell them apart -- the only clue used to
+        // be whether the folder being left happened to be named after what was
+        // in it, which is luck rather than information.
+        var plain = await NewModel("Otto Bismark", "Otto Bismark", "otto-bismark.stl");
+        var supported = await NewModel(
+            "Otto Bismark supported", "Otto Bismark supported", "otto-bismark-supported.stl");
+
+        await _editor.SetDesignerAsync(plain, "Loubie");
+        await _editor.SetDesignerAsync(supported, "Loubie");
+        await ClassifyAsync(plain);
+        await ClassifyAsync(supported);
+
+        var plan = await Plan(new OrganizeRules { FolderTemplate = "{designer}/{sculpt}" });
+
+        Assert.Equal(["Plain"], plan.Moves.Single(m => m.From == "Otto Bismark").Variants);
+        Assert.Equal(["Supported"],
+            plan.Moves.Single(m => m.From == "Otto Bismark supported").Variants);
+    }
+
+    [Fact]
+    public async Task Two_rows_landing_on_one_folder_name_say_what_lands_in_it()
+    {
+        // A destination is a folder and a folder is a sculpt, so two cuts of one
+        // mini rendering the same path is the point rather than a clash -- and
+        // it reads as a clash until the names landing in it are on screen.
+        var plain = await NewModel("Otto Bismark", "Otto Bismark", "otto-bismark.stl");
+        var supported = await NewModel(
+            "Otto Bismark supported", "Otto Bismark supported", "otto-bismark-supported.stl");
+
+        await _editor.SetDesignerAsync(plain, "Loubie");
+        await _editor.SetDesignerAsync(supported, "Loubie");
+        await ClassifyAsync(plain);
+        await ClassifyAsync(supported);
+
+        var plan = await Plan(new OrganizeRules { FolderTemplate = "{designer}/{sculpt}" });
+
+        // The same folder, deliberately: one sculpt, one folder.
+        Assert.Equal(["Loubie/otto bismark"], plan.Moves.Select(m => m.To).Distinct());
+
+        // And the two files that keep them apart inside it.
+        Assert.Equal(["otto-bismark.stl"],
+            plan.Moves.Single(m => m.From == "Otto Bismark").Landing);
+        Assert.Equal(["otto-bismark-supported.stl"],
+            plan.Moves.Single(m => m.From == "Otto Bismark supported").Landing);
+    }
+
+    [Fact]
+    public async Task A_row_carrying_several_cuts_lists_them_plain_first()
+    {
+        var id = await NewModel("Wall", "wall",
+            "UD-001-Wall.stl", "UD-001-SUP-Wall.stl", "UD-001-HOL-Wall.stl");
+        await ClassifyAsync(id);
+
+        var move = Assert.Single((await Plan(
+            new OrganizeRules { FolderTemplate = "{designer}/{sculpt}" })).Moves);
+
+        // Plain leads because it is the mini rather than a cut of it; the rest
+        // read alphabetically for the same reason the labels do.
+        Assert.Equal(["Plain", "Hollowed", "Supported"], move.Variants);
+    }
+
+    [Fact]
+    public async Task A_packs_readme_follows_the_pack_rather_than_stranding_its_folder()
+    {
+        // Splitting a pack used to leave its readme exactly where it was, and
+        // so left the pack folder standing with nothing but that readme in it.
+        // Browse then showed a model holding no models, beside the three
+        // sculpts that had just come out of it -- and a scan would never have
+        // made that row, because a folder becomes a model by holding a mesh.
+        var id = await NewModel("Orc Warband", "Orc Warband",
+            "orc-chief.stl", "orc-grunt.stl", "orc-shaman.stl", "readme.txt");
+        await _editor.SetDesignerAsync(id, "Dungeon Blocks");
+        await ClassifyAsync(id);
+
+        var warband = await _editor.CreateCollectionAsync("Orc Warband");
+        await _editor.SetCollectionMembershipAsync(id, warband.Id, true);
+
+        var plan = await Plan(new OrganizeRules
+        {
+            FolderTemplate = "{designer}/{collection}/{sculpt}",
+        });
+
+        // The folder every mini from this pack now shares, which is what the
+        // readme was describing.
+        var carried = plan.Moves.Single(m => m.Landing.Contains("readme.txt"));
+        Assert.Equal("Dungeon Blocks/Orc Warband", carried.To);
+
+        // And nothing is left behind for it to strand.
+        Assert.Equal(4, plan.Moves.Sum(m => m.FileIds.Count));
+    }
+
+    [Fact]
+    public async Task A_readme_stays_put_when_there_is_no_shared_folder_to_send_it_to()
+    {
+        // A template of nothing but {sculpt} leaves the library root as the only
+        // folder the minis share, and the root is not an answer -- dropping a
+        // readme there would scatter every pack's paperwork into one heap.
+        var id = await NewModel("Orc Warband", "Orc Warband",
+            "orc-chief.stl", "orc-grunt.stl", "readme.txt");
+        await ClassifyAsync(id);
+
+        var plan = await Plan(new OrganizeRules { FolderTemplate = "{sculpt}" });
+
+        Assert.DoesNotContain(plan.Moves, m => m.Landing.Contains("readme.txt"));
+    }
+
+    /// <summary>The names of the files a move would carry.</summary>
+    private async Task<List<string>> FileNamesAsync(IReadOnlyList<int> fileIds)
+    {
+        await using var db = _factory.CreateDbContext();
+        return await db.Files.Where(f => fileIds.Contains(f.Id)).Select(f => f.FileName).ToListAsync();
     }
 
     public void Dispose() => _conn.Dispose();

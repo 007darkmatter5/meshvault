@@ -36,7 +36,6 @@
         <HeaderContent>
             <MudTh>Account</MudTh>
             <MudTh>Role</MudTh>
-            <MudTh Style="text-align:right">Collections</MudTh>
             <MudTh Style="text-align:right">Favorites</MudTh>
             <MudTh>Created</MudTh>
             <MudTh Style="text-align:right">Actions</MudTh>
@@ -77,7 +76,6 @@
                     }
                 </MudSelect>
             </MudTd>
-            <MudTd DataLabel="Collections" Style="text-align:right">@context.Collections</MudTd>
             <MudTd DataLabel="Favorites" Style="text-align:right">@context.Favorites</MudTd>
             <MudTd DataLabel="Created">
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">@Formats.Ago(context.CreatedUtc)</MudText>
@@ -216,13 +214,13 @@
 
     private async Task Delete(UserSummary user)
     {
-        var owned = user.Collections + user.Favorites;
         var confirmed = await Dialogs.ShowMessageBoxAsync(
             $"Delete {user.UserName}?",
-            owned == 0
-                ? "The account will be removed. Models in the library are not affected."
-                : $"The account will be removed, along with its {user.Collections} collection(s) and "
-                  + $"{user.Favorites} favorite(s). Models in the library are not affected.",
+            user.Favorites == 0
+                ? "The account will be removed. Models and collections are not affected."
+                : $"The account will be removed, along with its {user.Favorites} favorite(s). "
+                  + "Models and collections are not affected — collections belong to the "
+                  + "library rather than to an account.",
             yesText: "Delete", noText: null, cancelText: "Cancel");
 
         if (confirmed != true) return;

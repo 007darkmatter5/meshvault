@@ -97,5 +97,37 @@ public class ModelEntry
     public List<ModelFile> Files { get; set; } = [];
     public List<Tag> Tags { get; set; } = [];
     public List<Collection> Collections { get; set; } = [];
+
+    /// <summary>
+    /// The collection that names this model's folder, starred by hand when the
+    /// model is in more than one.
+    /// </summary>
+    /// <remarks>
+    /// A model can be in any number of collections and lives in exactly one
+    /// folder, so something has to break the tie. It used to be whichever
+    /// sorted first alphabetically -- so a collection called "Archive" quietly
+    /// outranked the one somebody actually organises by, and adding a model to
+    /// a new collection could move it on disk for a reason nobody could see.
+    ///
+    /// Null means "work it out", which <see cref="PrimaryCollection"/> does:
+    /// the only collection when there is exactly one, and otherwise nothing.
+    /// Nothing collapses the <c>{collection}</c> level rather than guessing, so
+    /// unstarring is also how a model opts out of being filed by collection at
+    /// all.
+    /// </remarks>
+    public int? PrimaryCollectionId { get; set; }
+
+    /// <summary>
+    /// The collection that names this model's folder, or null when none does.
+    /// Needs <see cref="Collections"/> loaded.
+    /// </summary>
+    /// <remarks>
+    /// Resolved against the memberships rather than trusted outright: a star
+    /// left behind on a collection the model has since left would otherwise
+    /// keep naming its folder from outside it.
+    /// </remarks>
+    public Collection? PrimaryCollection =>
+        Collections.FirstOrDefault(c => c.Id == PrimaryCollectionId)
+        ?? (Collections.Count == 1 ? Collections[0] : null);
     public List<ModelFavorite> Favorites { get; set; } = [];
 }

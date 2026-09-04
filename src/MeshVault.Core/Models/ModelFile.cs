@@ -34,6 +34,10 @@ public class ModelFile
     /// unsupported, hollowed and solid — rather than several models. Null until
     /// <see cref="Services.VariantClassifier"/> has read the name, and only
     /// meshes and CAD files ever get one.
+    ///
+    /// Also null on a mesh whose name says only which variant it is —
+    /// "presupported.stl" — which is how such a file asks to be given a name
+    /// rather than being filed under whatever its folder happened to be called.
     /// </summary>
     public string? SculptKey { get; set; }
 
@@ -67,6 +71,25 @@ public class ModelFile
     /// proposes, the person decides, and the decision outlives the proposal.
     /// </remarks>
     public bool VariantSetByUser { get; set; }
+
+    /// <summary>
+    /// True once organizing has moved or renamed this file, pinning whatever it
+    /// was classified as at the time.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="VariantSetByUser"/> because the two mean
+    /// different things to a person reading the row: one is a decision somebody
+    /// made, the other is bookkeeping. Only the first should be shown as a
+    /// correction worth defending.
+    ///
+    /// Both stop <see cref="Services.VariantClassifier.Apply"/>, and for the
+    /// same underlying reason. Organizing rewrites the name and flattens the
+    /// containing folders -- the two things the classifier reads -- so a file
+    /// filed out of "Supported/goblin.stl" into "Goblin/goblin.stl" would come
+    /// back from the next scan as a plain export, having lost the only record
+    /// that it was supported.
+    /// </remarks>
+    public bool VariantSetByOrganize { get; set; }
 
     // Populated for meshes once geometry has been parsed.
     public int? TriangleCount { get; set; }

@@ -111,9 +111,20 @@ public class LibraryIndexer(
                 db.Models.Add(entry);
             }
 
+            // A model's name is read off its folder, and this used to read it
+            // only when inserting the row -- so it stopped tracking the moment
+            // anything else wrote it, and nothing here would ever put it right.
+            // Organizing did exactly that: two cuts of a mini merging into
+            // "otto bismark" left the merged row called "Otto Bismark
+            // supported", and no amount of rescanning corrected it.
+            //
+            // A name somebody typed is theirs, and survives this as it always has.
+            var renamed = !entry!.NameSetByUser && entry.Name != scanned.Name;
+            if (renamed) entry.Name = scanned.Name;
+
             var filesChanged = MergeFiles(entry!, scanned);
             if (isNew) added++;
-            else if (filesChanged) updated++;
+            else if (filesChanged || renamed) updated++;
             else continue;
 
             entry!.TotalBytes = scanned.TotalBytes;

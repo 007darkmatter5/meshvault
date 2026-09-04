@@ -57,6 +57,15 @@ public class OrganizeService(IServiceScopeFactory scopeFactory, ILogger<Organize
                 libraryId, true, Describe(p), null, DateTimeOffset.UtcNow, p)));
 
             var result = await executor.ApplyAsync(libraryId, plan, progress);
+
+            // Organizing creates, merges and empties model folders, and a group
+            // is a set of models -- so the memberships have moved even though no
+            // sculpt key did. Filing four folders of one mini into one is
+            // exactly the case: what was a group of four is now a single model,
+            // and the rows saying otherwise would outlive it.
+            await scope.ServiceProvider.GetRequiredService<GroupReconciler>()
+                .ReconcileAsync(libraryId);
+
             status = new OrganizeStatus(
                 libraryId, false, Describe(result), result, DateTimeOffset.UtcNow);
         }

@@ -1,0 +1,62 @@
+@*
+    Why this row is going where it is going.
+
+    A destination reads like any other once it has been rendered. "Dungeon
+    Blocks/Unsorted/UD 067 Hole Trap" and "Dungeon Blocks/The Ultimate
+    Dungeon/UD 067 Hole Trap" are the same shape, and nothing on the page said
+    which token produced which segment -- so a pack that split where it was not
+    expected to, or a mini filed under the wrong designer, could only be
+    explained by opening the model and guessing backwards.
+
+    Shown as the template's own tokens rather than as prose. The person reading
+    this wrote the template; naming its parts back to them is the shortest route
+    from "that is wrong" to knowing which field to change.
+
+    A token with nothing behind it is called out rather than shown as its
+    placeholder, because "Unsorted" the answer and "Unsorted" the designer's
+    name are indistinguishable written down, and telling them apart is the
+    reason to look.
+*@
+
+@* Which cuts of the mini are travelling. Two folders holding one sculpt plan
+   two moves whose destinations differ only in a level that says nothing about
+   which is which -- so "otto bismark" and "otto bismark" read identically here,
+   and the only clue was whether the folder being left happened to be named
+   after its contents. A variant combination is what makes one copy distinct,
+   so it is stated rather than inferred. *@
+@if (Variants.Count > 0)
+{
+    <div class="token-trace mt-1">
+        <span class="token-part">
+            <span class="token-name">carrying</span>
+            <span class="token-value">@string.Join(", ", Variants)</span>
+        </span>
+    </div>
+}
+
+@if (Tokens.Count > 0)
+{
+    <div class="token-trace mt-1">
+        @foreach (var token in Tokens)
+        {
+            <span class="token-part">
+                <span class="token-name">@token.Name</span>
+                @if (token.Value is { } value)
+                {
+                    <span class="token-value">@value</span>
+                }
+                else
+                {
+                    <span class="token-empty">nothing &mdash; placeholder used</span>
+                }
+            </span>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<ResolvedToken> Tokens { get; set; } = [];
+
+    /// <summary>The variants the meshes in this row carry.</summary>
+    [Parameter] public IReadOnlyList<string> Variants { get; set; } = [];
+}

@@ -63,6 +63,14 @@ public class ScanService(IServiceScopeFactory scopeFactory, ILogger<ScanService>
                 ? await indexer.IndexAsync(libraryId, progress)
                 : await indexer.IndexFolderAsync(libraryId, subPath, progress);
 
+            // Grouping is read from the files, so a scan that added the fourth
+            // cut of a mini has to settle the library it just changed. Whole
+            // library even after an inbox scan: the folders the new one joins
+            // are outside the inbox, and this is rows rather than a walk of the
+            // share, so it costs nothing next to what has just been done.
+            await scope.ServiceProvider.GetRequiredService<GroupReconciler>()
+                .ReconcileAsync(libraryId);
+
             // Which folder was looked at, because "removed 0" reads very
             // differently depending on whether the whole library was walked.
             var where = string.IsNullOrWhiteSpace(subPath) ? "" : $"{subPath}/: ";

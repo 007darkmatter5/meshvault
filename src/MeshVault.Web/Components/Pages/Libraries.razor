@@ -145,10 +145,6 @@
                     <MudIconButton Icon="@Icons.Material.Filled.Settings" Size="Size.Small"
                                    OnClick="@(() => EditLibrary(context))" />
                 </MudTooltip>
-                <MudTooltip Text="Find folders holding the same sculpt and show them as one">
-                    <MudIconButton Icon="@Icons.Material.Filled.Merge" Size="Size.Small"
-                                   Href="@($"/libraries/{context.Id}/regroup")" />
-                </MudTooltip>
                 <MudTooltip Text="@(HasInbox(context)
                                     ? $"Scan only {Inbox.Normalize(context.InboxPath)}/ - seconds, not a walk of the whole share"
                                     : "This library has no inbox folder set")">

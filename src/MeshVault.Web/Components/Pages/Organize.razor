@@ -525,9 +525,18 @@ else
                                             </MudText>
                                         }
                                         <RenamePreview Renames="context.Renames" />
+                                        <TokenTrace Tokens="context.Tokens" Variants="context.Variants" />
                                         break;
+
+                                    @* Incomplete used to fall through to the
+                                       default and render an empty destination
+                                       with no explanation anywhere -- so a model
+                                       held back for want of a designer, or a
+                                       mesh whose name never said which mini it
+                                       is, simply showed a blank cell. *@
                                     case MoveOutcome.Collides:
                                     case MoveOutcome.Unusable:
+                                    case MoveOutcome.Incomplete:
                                         <MudTooltip Text="@context.Problem">
                                             <MudText Typo="Typo.caption" Color="Color.Warning">
                                                 skipped &mdash; @context.Problem
@@ -539,7 +548,28 @@ else
                                            when it is not going. Replacing the
                                            path with "left alone" would hide the
                                            very thing being decided about. *@
-                                        <MudText Typo="Typo.caption" Class="path-cell">@context.To</MudText>
+                                        @* The whole path a file ends up at, not
+                                           a folder and a list to join by eye. A
+                                           folder is a sculpt, so two cuts of one
+                                           mini render the same folder on purpose
+                                           -- and that reads as a collision right
+                                           up until the filename is on the end of
+                                           it. With renaming on the preview below
+                                           already says what each file becomes,
+                                           so the folder alone is enough. *@
+                                        @if (context.Renames.Count == 0 && context.Landing.Count > 0)
+                                        {
+                                            foreach (var name in context.Landing)
+                                            {
+                                                <MudText Typo="Typo.caption" Class="path-cell">
+                                                    @context.To/@name
+                                                </MudText>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <MudText Typo="Typo.caption" Class="path-cell">@context.To</MudText>
+                                        }
                                         @if (!_chosen.Contains(context.ModelId)
                                              && _actionable.Contains(context.ModelId))
                                         {
@@ -548,6 +578,7 @@ else
                                             </MudText>
                                         }
                                         <RenamePreview Renames="context.Renames" />
+                                        <TokenTrace Tokens="context.Tokens" Variants="context.Variants" />
                                         break;
                                 }
                             </MudTd>
@@ -824,7 +855,7 @@ else
     private Library? _library;
     private OrganizePlan? _plan;
     /// <summary>Where a library with no convention of its own starts.</summary>
-    private const string DefaultFolderTemplate = "{designer}/{model}";
+    private const string DefaultFolderTemplate = "{designer}/{collection}/{sculpt}";
     private const string DefaultFileTemplate = "{model} - {file}";
 
     private string _folderTemplate = DefaultFolderTemplate;

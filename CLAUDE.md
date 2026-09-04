@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 dotnet build                                  # whole solution
-dotnet test                                   # all 538 tests, ~6s
+dotnet test                                   # all 570 tests, ~5s
 dotnet run --project src/MeshVault.Web        # http://localhost:5082 in Development
 
 # One class, or one test
@@ -29,10 +29,40 @@ open, and the build fails with `MSB3021 ... being used by another process`:
 dotnet ef migrations add <Name> -p src/MeshVault.Data -s src/MeshVault.Web -o Migrations
 ```
 
-Migrations apply automatically at startup via `DatabaseInitializer`. When a migration drops a
+Migrations apply automatically at startup via `DatabaseInitializer`, and `DatabaseBackup` copies the
+database aside first whenever any are pending. **A failed backup stops the server**, deliberately:
+some migrations move rows rather than columns and cannot be undone, so starting anyway would apply
+one with no way back. A server that refuses to start with a clear reason is recoverable in a way a
+merged database is not. Copies land in `<DataPath>/backups/`, newest five kept, taken with
+`VACUUM INTO` rather than a file copy — SQLite holds recent writes in a `-wal` sidecar, so copying
+the `.db` alone can miss exactly the newest data.
+
+When a migration drops a
 column whose data must survive, hand-write the transfer SQL into the generated `Up()` **before**
 the `DropColumn` calls — see `DesignersCollectionsAndFavorites`, which moved `IsFavorite` into a
 per-user table and a `Designer` string into an entity without losing anything.
+
+`SharedCollections` is the other one, and the harder case: dropping `Collection.OwnerId` means two
+accounts' "To Print" become one, so it unions the memberships onto the survivor **before** the new
+unique index exists. `StarTheFilingCollection` then backfills `PrimaryCollectionId` to whatever the
+old alphabetical rule was already choosing, so the pair moves nothing on disk.
+
+**Why that is two migrations and not one.** The SQLite provider rebuilds a table both to drop a
+column and to add one carrying a foreign key, and raw SQL issued once a rebuild is pending reads a
+database midway through being rearranged. EF warns (`Migrations[30200]`), and the fix it suggests is
+a subsequent migration — which starts with nothing pending. Written as one migration it warns twice;
+split, both are silent. Worth checking after adding any data-moving `Up()`:
+
+```bash
+dotnet ef database update -p src/MeshVault.Data -s src/MeshVault.Web 2>&1 | grep -c pending
+```
+
+28 is the baseline from migrations predating this note, so only an increase means something.
+
+`SharedCollectionsMigrationTests` covers the pair by actually running migrations against a file
+database — every other test builds its schema with `EnsureCreated`, which skips migrations entirely,
+so nothing else here would notice a data-moving `Up()` being wrong until it ran against a real
+library, once.
 
 ## Architecture
 
@@ -79,10 +109,19 @@ why `/diag/ws` exists to test the upgrade without disturbing a live circuit.
 
 ### Per-user data
 
-`ICurrentUser.UserId` is the owner of collections and favorites, resolved from claims by
-`SignedInUser`. Anonymous requests fall back to `Users.LocalUserId` (`"local"`), which predates
-authentication; the first account to register adopts that data (`AccountSetup.AdoptLegacyDataAsync`).
-Tags, designers and source metadata are shared — they describe the model, not the viewer.
+`ICurrentUser.UserId` is the owner of **favorites**, resolved from claims by `SignedInUser`.
+Anonymous requests fall back to `Users.LocalUserId` (`"local"`), which predates authentication; the
+first account to register adopts that data (`AccountSetup.AdoptLegacyDataAsync`). Tags, designers,
+source metadata **and collections** are shared — they describe the model, not the viewer.
+
+Collections used to be per-user and are not any more, because `{collection}` is a level in the
+folder template: a collection names a folder on disk, which makes it a fact about the model. While
+it was owned, the layout of the share depended on who was signed in. Favorites are the contrast and
+stay per-user — two people can disagree about what is a favourite and nothing moves.
+
+Consequences that are easy to undo by accident: deleting an account must **not** delete collections
+(`UserAdmin` deletes only favorites now), `AdoptLegacyDataAsync` has nothing to adopt for them, and
+a public visitor sees the library's collections the way they already see its tags.
 
 `ModelCatalog` returns `ModelCard` (model + `IsFavorite`) rather than `ModelEntry`, because
 "is this a favorite" depends on who is asking.
@@ -110,12 +149,61 @@ ever *propose*:
   Settings → Variants. Its `PreviewRank` decides which export a preview opens on and which supplies
   a card image, so "supports look bad" is a number on a row rather than a rule in the code.
 - `VariantGrouper` gathers a model's files into sculpts for the viewer and file table.
-- `GroupPlanner`/`GroupStore` do the same one level up, linking *separate models* that hold the same
-  sculpt. `ModelEntry.GroupKey`/`GroupPrimary` are written only by an approved regroup, never by a
-  scan, and Browse lists `GroupKey IS NULL OR GroupPrimary` so a group shows once.
+- `GroupReconciler` does the same one level up, linking *separate models* that hold the same sculpt.
+  Browse lists `GroupKey IS NULL OR GroupPrimary` so a group shows once.
+
+**`GroupKey`/`GroupName`/`GroupPrimary` are derived, and stored anyway.** Derived because a group is
+just "these folders hold one sculpt", which the files already say; stored because Browse has to
+filter on it, and computing it per query is the correlated sub-select SQLite cannot do (see
+*Testing notes*). So they are a cache, and the rule is that nothing writes them except
+`GroupReconciler.ReconcileAsync`, which is called after everything that can change the answer:
+
+| after | why |
+|---|---|
+| `ScanService` | a scan added the fourth cut of a mini |
+| `OrganizeService` | folders were created, merged or emptied — the memberships moved |
+| `VariantReindexer` | the vocabulary changed, so sculpt keys did |
+| `ModelDetail.SaveVariant` | somebody named a sculpt by hand |
+
+This replaced a `Regroup` page where `GroupPlanner` proposed and you approved. The reasoning for
+approval was that "a library that rearranges itself after every scan is worse than one that never
+does" — true of anything that moves files, and **grouping moves nothing**; it changes how Browse
+lists what is already there. Approval meant the library was grouped only if you remembered to ask,
+and stopped being grouped correctly as soon as a scan found another cut.
+
+The property that makes it safe to run unattended is that it **settles**:
+`Reconciling_a_settled_library_changes_nothing` pins that a second pass returns 0. It can only
+settle because sculpt keys are stable — organizing pins them, and a hand-set one is never
+overwritten.
+
+There is no Ungroup. Correcting a file's sculpt is what separates two folders, because that is where
+the grouping comes from; a button that overrode the reading would be undone by the next scan.
 
 `ModelFile.VariantSetByUser` and `ModelEntry.NameSetByUser` are the same bargain: the app proposes,
 the person decides, and the decision outlives the proposal. Never overwrite a row carrying one.
+
+### The vocabulary
+
+Settled with the library's owner, and worth using consistently in the UI:
+
+| term | is | in code |
+|---|---|---|
+| **sculpt** | which mini — the grouping, and the folder once organized | `ModelFile.SculptKey`, and `ModelEntry` in the organized shape |
+| **model** | a sculpt plus the variant combination that makes one copy unique | one `ModelFile` |
+| **variant** | a tag on a model; several combine — Supported + Hollowed + No logo | `ModelFile.VariantLabel` |
+| **collection** | a pack, or any curated group; names a folder level | `Collection` |
+
+"Orc Warband holding Orc Chief, Orc Grunt and Orc Shaman" is a *collection* of three *sculpts*, each
+with several *models* in it. `SculptPanel` is where that shape is shown and edited, and it says so
+out loud when a folder holds more than one sculpt — everywhere else in the app such a folder reads
+as one thing under the pack's name, which is the confusion this vocabulary exists to end.
+
+**`SculptPanel` replaced an editor inside a row of the file table.** That one could only correct a
+single file, so renaming a sculpt with six exports meant typing the same name into six dialogs — one
+slip leaving two sculpts a letter apart with nothing on screen saying why they had stopped grouping.
+`ModelEditor` now has the sculpt-level verbs: `RenameSculptAsync`, `SetSculptAsync` (many files at
+once) and `SetVariantsAsync`. **Renaming onto a name another sculpt already has merges them**, which
+is not a special case — the key is what groups — so there is no separate merge to drift out of step.
 
 A sculpt's display name is *derived from its file's name on every scan*, and the app renames files
 itself. Organizing under a case convention therefore used to relabel the library on the next scan —
@@ -123,6 +211,25 @@ itself. Organizing under a case convention therefore used to relabel the library
 `VariantClassifier.Apply` now keeps the stored spelling when the new one differs by **case alone**;
 the key is lowercased regardless, so nothing groups differently. `SculptNameRestorer` repairs a
 library already caught, out of the `OrganizeStep.From` paths the undo record keeps anyway.
+
+That was a repair, not a fix. `OrganizeExecutor` now **pins** every mesh it moves or renames
+(`ModelFile.VariantSetByOrganize`), and `Apply` skips a pinned row. Both halves of what the
+classifier reads are destroyed by organizing — the words in the name, and the folders standing
+above the file inside its model — so a file filed out of `Supported/goblin.stl` into
+`Goblin/goblin.stl` came back from the next scan as a plain export. Kept apart from
+`VariantSetByUser` because only one of the two is a decision somebody made and worth showing as
+such; `ResetVariantAsync` clears both, or the bookkeeping flag would be the reason a person could
+not get detection back.
+
+**A name that is nothing but variant words yields no sculpt at all.** `presupported.stl` says which
+flavour it is and never which mini. It used to borrow the model's folder name, which reads well for
+`Goblin/supported.stl` and disastrously for a container: a loose download in the inbox became a
+sculpt called `inbox` — the inbox directly contains a mesh, so `FolderScanner` makes it a model
+named after itself — and `STLs/presupported.stl` a sculpt called `STLs`. The folder is a sculpt
+often enough to be tempting and a container often enough to be wrong, and nothing there can tell
+which. `SculptKey` is left null, the variant is still recorded, and `OrganizePlanner` reports the
+file `Incomplete` rather than filing it under the `{sculpt}` placeholder — which is also why that
+token now falls back to **nothing** rather than to "Unsorted", the same bargain `{variant}` makes.
 
 `VariantClassifier.Version` plus a fingerprint of the definitions gates the startup recompute in
 `VariantReindexer` — bump it when a pass would now produce a different result, including derived
@@ -156,9 +263,47 @@ differently from the setting. Husks *inside* the inbox are still cleared.
 `OrganizePlanner` proposes; `OrganizeExecutor` applies; nothing else calls either. `AllowOrganize`
 is permission, not instruction, and is checked in the executor rather than only the page.
 
+Every row carries `PlannedMove.Tokens` — what the folder template resolved, token by token. A
+rendered destination reads like any other, so "why did it choose that path" was unanswerable from
+the page; `TokenTrace` shows it under the path, marking a token that fell back rather than printing
+its placeholder, since "Unsorted" the answer and "Unsorted" the designer look identical written
+down. `MoveOutcome.Incomplete` renders alongside `Collides` and `Unusable`: it used to fall through
+to the default arm and show an empty destination with its reason nowhere on screen.
+
 `{sculpt}` in the folder template is the one token that changes how many folders come out of a
 model: a pack of ninety-eight breaks apart, and four folders holding one mini between them come
 together. Same rule, both directions.
+
+**The shipped default is `{designer}/{collection}/{sculpt}`**, in `OrganizeRules` and in
+`Organize.razor`'s `DefaultFolderTemplate` — change both together. It was `{designer}/{model}`,
+which has no `{sculpt}` in it, so a library that had never had a template chosen **never split a
+pack at all**: a folder called "Orc Warband" holding three minis planned one move and stayed one
+folder called "Orc Warband", which is the shape organizing exists to undo.
+`The_shipped_default_files_a_pack_by_sculpt` pins it, and goes to the planner directly rather than
+through the test harness's `Plan` helper — that helper pins `{designer}/{model}`, because nearly
+every planner test was written against it and inheriting the default would silently rewrite them
+into asking a different question.
+
+`{collection}` is the only token whose value a model can have **several** of, and it lives in one
+folder — so `ModelEntry.PrimaryCollectionId` is the star that picks. It used to be whichever sorted
+first alphabetically, which meant a collection called "Archive" quietly outranked the one somebody
+organises by, and adding a model to a new collection could move it on disk for no visible reason.
+
+The rules, all in `ModelEntry.PrimaryCollection` and `ModelEditor.SettleStar`:
+
+- One collection is **implicitly** primary and stores no star — one less value to keep in step.
+- Gaining a second **materialises** that implicit star, so nothing moves. Without this, adding a
+  model to a second collection would leave it with two collections and no star, collapse the level,
+  and quietly un-file it.
+- Leaving the starred collection **clears** the star rather than moving it. Which survivor should
+  name the folder is not guessable, and no star is a shape somebody can see and correct.
+- A star pointing outside the memberships is ignored, so it can never name a folder the model has no
+  claim to.
+- `{collection}` falls back to **nothing**, like `{sculpt}` and `{variant}`, so a model with no
+  primary loses the level instead of filling an `Unfiled/` folder with most of the library.
+
+`ApplyBulkEditAsync` shares `SettleStar` deliberately: filing per collection instead would leave a
+few hundred models with two collections and no star, and the next organize would un-file every one.
 
 `{variant}` is the one token whose fallback is **empty rather than a word**. Every other names
 something a model has — a designer, a year — so a gap is worth marking; a variant is a thing a file
@@ -173,6 +318,31 @@ is not per model — `{sculpt}` exists to bring separate folders holding one min
 merging models are named one at a time with neither aware of the other. Only `MarkColliding` sees
 every landing in the library at once, so it is the only place that can. With renaming **off** a
 clash is still a `PlannedConflict`: the name is not ours to choose, so the file stays put.
+
+**A model's name is derived from its folder, so three places have to derive it.**
+`FolderScanner` reads it, and it stopped tracking anywhere the row was written without a scan
+watching. All three said one thing while the path said another:
+
+- `LibraryIndexer` set `Name` **only on insert**, so nothing ever put a stale one right.
+- `OrganizeExecutor` named a *new* model from its destination (`OwnerForAsync`) but left a **reused**
+  one alone — so two cuts of a mini merging into `otto bismark` kept the name of whichever row won
+  the merge, "Otto Bismark supported".
+- `OrganizeUndo` restored `RelativePath` and not `Name`, undoing the half nobody could see.
+
+All three now re-derive unless `NameSetByUser`, which is the same bargain as everywhere else.
+
+**A pack's leftovers follow the pack.** Splitting a folder of several sculpts leaves files the
+reading places nowhere — a readme, a licence — and filing them under whichever mini sorted first
+would be a guess. They used to stay put, which left the pack folder standing holding nothing but
+them: a model with no models in it, sitting in Browse beside the sculpts that came out of it, and a
+row **a scan would never create** (a folder becomes a model by holding a mesh). They now go to the
+folder template rendered with **no sculpt** — the same template one level up, which is the folder
+every mini from that pack shares. An empty result means the template was nothing but `{sculpt}`, and
+they stay put rather than being dropped at the library root.
+
+Known and left alone: that folder usually holds no mesh of its own, so the readme is not indexed
+once it gets there. It is in the right place for a person reading the share, and invisible to the
+catalog — the same as before, minus the phantom model.
 
 Rules the executor will not bend:
 
@@ -195,6 +365,24 @@ Rules the executor will not bend:
   `LibraryIndexer` clears when bytes move, so a stored hash is current or absent, never stale.
 - Every file must end up inside its model's folder. A file blocked by a clash while its model moved
   gets a row of its own at the folder it is actually in (`RehomeStrandedAsync`).
+
+**`NameCasing.VariantSeparator` is `--`**, and it separates a sculpt from its variants:
+`ud-001-wall--hollowed-supported`. One dash is indistinguishable from a word break — "wall-no-logo"
+cannot say whether the sculpt is "Wall" or "Wall No" — and an underscore vanishes under snake_case,
+which spends underscores on every word. It has to survive `NameCasing.Apply`, which treats every
+other non-alphanumeric character as a word break, so that method splits on it and cases each side.
+Only a **tight** separator counts: "Wall -- Door" is a creator padding a dash out and still collapses
+to one break, while "wall--door" is structure. `Sanitize` trims it off a file with no variants, so a
+plain export is `ud-001-wall`, not `ud-001-wall--`.
+
+Variant labels are ordered **alphabetically**, not by `PreviewRank`. Rank is a display preference —
+which export previews best — and letting it order the words in every filename meant nudging one
+silently changed the other.
+
+The last preset, "Rebuild the names", is the only one that uses this; everything above it keeps
+`{file}` and only changes its case. `A_renaming_preset_never_throws_away_which_cut_of_a_mini_a_file_is`
+pins the invariant that matters: a renaming preset must carry `{file}` *or* `{variant}`, or every cut
+of a mini flattens onto one name and gets numbered.
 
 `NameCase` (kebab, snake, camel, Pascal, or `AsWritten`) is applied by `PathTemplate.Render` **per
 segment and before `Sanitize`** — per segment because `NameCasing` treats every non-alphanumeric
@@ -318,12 +506,15 @@ and would otherwise linger unreachable.
 over* — promoting anyone demotes the incumbent, atomically. Refusing the promotion instead would
 deadlock against the last-admin guard: with demotion of the only admin refused too, no sequence of
 single steps could move the role, and on a self-hosted box that is unrecoverable.
-`The_role_can_always_be_handed_on` pins this. The reason for the cap is not really accounts —
-`{collection}` is a folder token resolved per-user (`OrganizePlanner` filters
-`Collections.Where(c => c.OwnerId == userId)`), so **two admins would file the same library two
-different ways on disk**. Measured on the author's library: 2 models unfiled as the owner, 106 as a
-second account. If collections ever become a property of the model rather than the viewer, this cap
-is what can be lifted.
+`The_role_can_always_be_handed_on` pins this. The cap's original reason was not accounts at all:
+`{collection}` was a folder token resolved per-user, so **two admins would have filed the same
+library two different ways on disk** — measured on the author's library at the time, 2 models
+unfiled as the owner and 106 as a second account.
+
+**That reason is gone**: collections are shared now. The cap is kept deliberately rather than
+because anything still needs it, so lifting it is a decision rather than a repair — remove the
+"exactly one Admin" rule in `CreateAsync` and the role hand-over in `SetRoleAsync`, and keep the
+last-admin and self-delete guards, which protect against something else entirely.
 
 Password rules are **length-only** (10 characters, no composition requirements). They are declared
 in `Program.cs`, `Register.razor`, `Account.razor` and each test harness — change all of them together.

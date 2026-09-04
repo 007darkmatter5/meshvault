@@ -136,11 +136,11 @@ public class SculptNameRestorer(
         var original = Path.GetFileName(originalPath);
         if (string.IsNullOrEmpty(original)) return false;
 
-        var fallback = string.IsNullOrWhiteSpace(model.Name)
-            ? Path.GetFileNameWithoutExtension(original)
-            : model.Name;
-
-        var was = classifier.Classify(fallback, original).DisplayName;
+        // Null when the original name was nothing but variant words, which
+        // leaves no earlier spelling to put back -- the stored one did not come
+        // from here.
+        var was = classifier.Classify(original).DisplayName;
+        if (was is null) return false;
 
         if (string.Equals(was, file.SculptName, StringComparison.Ordinal)) return false;
         if (!string.Equals(was, file.SculptName, StringComparison.OrdinalIgnoreCase)) return false;

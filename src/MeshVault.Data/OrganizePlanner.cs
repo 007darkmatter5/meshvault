@@ -8,7 +8,15 @@ namespace MeshVault.Data;
 public record OrganizeRules
 {
     /// <summary>Folder each model lands in, relative to the library root.</summary>
-    public string FolderTemplate { get; init; } = "{designer}/{model}";
+    /// <remarks>
+    /// A folder per sculpt, under the collection it belongs to. This used to be
+    /// <c>{designer}/{model}</c>, which has no <c>{sculpt}</c> in it -- so a
+    /// pack of three minis was never split and stayed one folder named after
+    /// the pack, which is the shape organizing exists to undo. Both levels above
+    /// it close up when a model has nothing for them, so a model with no
+    /// designer and no collection still lands at one folder for its sculpt.
+    /// </remarks>
+    public string FolderTemplate { get; init; } = "{designer}/{collection}/{sculpt}";
 
     /// <summary>
     /// Name for each file inside that folder. Ignored unless
@@ -104,10 +112,64 @@ public record PlannedMove(
     /// </summary>
     public IReadOnlyList<string> Fallbacks { get; init; } = [];
 
+    /// <summary>
+    /// What the folder template resolved to, token by token, in the order it
+    /// names them.
+    /// </summary>
+    /// <remarks>
+    /// The answer to "why did it choose that path", which nothing else on the
+    /// page could give. A rendered destination reads like any other, so a
+    /// surprising one -- a pack splitting where it was not expected to, a mini
+    /// landing under the wrong designer -- has to be explained by the values
+    /// behind it rather than by the string they produced.
+    /// </remarks>
+    public IReadOnlyList<ResolvedToken> Tokens { get; init; } = [];
+
+    /// <summary>
+    /// The variants the meshes in this row carry, "Plain" included.
+    /// </summary>
+    /// <remarks>
+    /// What tells two rows of the same sculpt apart. Two folders holding one
+    /// mini plan two moves whose destinations differ only in a level that has
+    /// nothing to do with which cut each is -- the plain one and the supported
+    /// one read identically on the right of the page, and the only clue was
+    /// whether the source folder happened to be named after its contents.
+    ///
+    /// A variant combination is precisely what makes one copy of a sculpt
+    /// distinct from another, so it belongs beside the destination rather than
+    /// being inferred from the folder a file is leaving.
+    /// </remarks>
+    public IReadOnlyList<string> Variants { get; init; } = [];
+
+    /// <summary>
+    /// Every file that would end up in the destination, by name.
+    /// </summary>
+    /// <remarks>
+    /// A destination is a folder, and a folder is a sculpt -- so two cuts of one
+    /// mini are *supposed* to render the same path, and reading that as a clash
+    /// is the natural mistake. What settles it is the file each row is putting
+    /// in there, which the plan never showed unless renaming happened to be on.
+    ///
+    /// Shown joined to <c>To</c>, so a row reads as the whole path a file ends
+    /// up at rather than a folder and a separate list to combine by eye. Left
+    /// out when renaming is on: <c>Renames</c> already says what every file
+    /// becomes, and saying it twice in two shapes is worse than once.
+    /// </remarks>
+    public IReadOnlyList<string> Landing { get; init; } = [];
+
     public bool IsSplit => Sculpt is not null;
 }
 
 public record PlannedRename(int FileId, string From, string To);
+
+/// <summary>One token of the folder template, and what this row gave it.</summary>
+/// <param name="Value">
+/// Null when the model had nothing for it, so the token's placeholder stood in.
+/// Kept as null rather than as the placeholder itself: "Unsorted" as an answer
+/// and "Unsorted" as a real designer's name look identical written down, and
+/// the difference is the whole reason somebody is reading this.
+/// </param>
+public record ResolvedToken(string Name, string? Value);
 
 /// <summary>A file the plan would remove rather than move, and why.</summary>
 /// <param name="Verify">
@@ -297,7 +359,7 @@ public class OrganizePlanner(
             .Include(m => m.Designer)
             .Include(m => m.Tags)
             .Include(m => m.Files)
-            .Include(m => m.Collections.Where(c => c.OwnerId == userId))
+            .Include(m => m.Collections)
             .OrderBy(m => m.RelativePath)
             .ToListAsync(ct);
 
@@ -368,6 +430,9 @@ public class OrganizePlanner(
                     MoveOutcome.AlreadyThere, Renames: settled.Renames)
                 {
                     Numberings = settled.Numberings,
+                    Tokens = Explain(rules.FolderTemplate, TokensFor(model)),
+                    Variants = VariantsIn(model.Files),
+                    Landing = LandingIn(model.Files),
                 });
                 continue;
             }
@@ -387,6 +452,9 @@ public class OrganizePlanner(
             {
                 Fallbacks = FallbacksIn(rules.FolderTemplate, TokensFor(model)),
                 Numberings = moving.Numberings,
+                Tokens = Explain(rules.FolderTemplate, TokensFor(model)),
+                Variants = VariantsIn(model.Files),
+                Landing = LandingIn(model.Files),
             });
         }
 
@@ -413,6 +481,61 @@ public class OrganizePlanner(
         .. PathTemplate.TokenNames(template)
             .Where(t => tokens.TryGetValue(t, out var value) && string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.OrdinalIgnoreCase),
+    ];
+
+    /// <summary>
+    /// Every token the template names, paired with what this model gave it.
+    /// </summary>
+    /// <remarks>
+    /// Tokens the template asks for and nothing here defines are left out
+    /// rather than reported empty: those are typing mistakes, and
+    /// <see cref="PathTemplate.UnknownTokens"/> already says so in the field
+    /// where they were typed.
+    /// </remarks>
+    /// <summary>
+    /// The distinct variants some files carry, in the order they read best:
+    /// the plain export first, then the rest alphabetically.
+    /// </summary>
+    /// <remarks>
+    /// Meshes only. A readme carries no variant, and listing "Plain" for one
+    /// would claim it was an export of something.
+    /// </remarks>
+    /// <summary>
+    /// Every file that would end up in the destination, by name, meshes first
+    /// and best export leading.
+    /// </summary>
+    /// <remarks>
+    /// All of them rather than only the meshes. The row's count says how many
+    /// files move, and a list one shorter than that count reads as a promise to
+    /// leave something behind.
+    /// </remarks>
+    private static List<string> LandingIn(IEnumerable<ModelFile> files) =>
+    [
+        .. files
+            .OrderBy(f => f.Kind is FileKind.Mesh or FileKind.Cad ? 0 : 1)
+            .ThenBy(f => f.VariantRank)
+            .ThenBy(f => f.FileName, StringComparer.OrdinalIgnoreCase)
+            .Select(f => f.FileName),
+    ];
+
+    private static List<string> VariantsIn(IEnumerable<ModelFile> files) =>
+    [
+        .. files
+            .Where(f => f.Kind is FileKind.Mesh or FileKind.Cad)
+            .Select(f => f.VariantLabel ?? "Plain")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(v => v == "Plain" ? 0 : 1)
+            .ThenBy(v => v, StringComparer.OrdinalIgnoreCase),
+    ];
+
+    private static List<ResolvedToken> Explain(
+        string template, IReadOnlyDictionary<string, string?> tokens) =>
+    [
+        .. PathTemplate.TokenNames(template)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(tokens.ContainsKey)
+            .Select(t => new ResolvedToken(
+                t, string.IsNullOrWhiteSpace(tokens[t]) ? null : tokens[t])),
     ];
 
     private static string Destination(ModelEntry model, OrganizeRules rules) =>
@@ -548,10 +671,30 @@ public class OrganizePlanner(
             {
                 File = f,
                 Read = classifier.Classify(
-                    model.Name, VariantClassifier.WithinModel(model.RelativePath, f.RelativePath)),
+                    VariantClassifier.WithinModel(model.RelativePath, f.RelativePath)),
             })
             .GroupBy(x => x.File.SculptKey ?? x.Read.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        // Meshes whose names never said which mini they are — "presupported.stl".
+        // {sculpt} would render its placeholder for these and shelve real work
+        // under "Unsorted", where it reads as filed and is not. Say so instead:
+        // a name is a question for the person who owns the library, and the one
+        // thing that cannot be guessed from a file that only describes itself.
+        var unnamed = bySculpt.FirstOrDefault(g => g.Key is null)
+            ?.Where(x => x.File.Kind is FileKind.Mesh or FileKind.Cad)
+            .ToList() ?? [];
+
+        if (unnamed.Count > 0)
+        {
+            yield return new PlannedMove(model.Id, model.Name, model.RelativePath, "",
+                MoveOutcome.Incomplete,
+                unnamed.Count == 1
+                    ? $"{unnamed[0].File.FileName} says only which variant it is, so there is "
+                      + "nothing to file it under. Give it a name first."
+                    : $"{unnamed.Count} files say only which variant they are, so there is "
+                      + "nothing to file them under. Give them names first.");
+        }
 
         // A sculpt is real when a mesh carries it — here, or anywhere else in
         // the library.
@@ -562,14 +705,22 @@ public class OrganizePlanner(
         // meshes in this folder would call that unusable and strand it for
         // good: the meshes are never coming back to fetch it.
         var real = bySculpt
+            .Where(g => g.Key is not null)
             .Where(g => g.Any(x => x.File.Kind is FileKind.Mesh or FileKind.Cad)
-                     || meshOwners.ContainsKey(g.Key))
+                     || meshOwners.ContainsKey(g.Key!))
             .ToList();
 
         if (real.Count == 0)
         {
-            yield return new PlannedMove(model.Id, model.Name, model.RelativePath, "",
-                MoveOutcome.Unusable, "Nothing in this folder reads as a mini to file it under.");
+            // Silent when the reason has already been given above. A folder
+            // whose only meshes need names is one problem, and reporting it
+            // twice in two different words would read as two.
+            if (unnamed.Count == 0)
+            {
+                yield return new PlannedMove(model.Id, model.Name, model.RelativePath, "",
+                    MoveOutcome.Unusable, "Nothing in this folder reads as a mini to file it under.");
+            }
+
             yield break;
         }
 
@@ -578,9 +729,14 @@ public class OrganizePlanner(
         // that mini's and follow it, which is what dissolves the folder
         // completely. When it holds many they are the pack's, and filing them
         // under whichever mini sorted first would be a guess, so they stay.
+        //
+        // A mesh still waiting for a name is not an orphan and must not be swept
+        // along with one: it was just reported as staying put, and carrying it
+        // off inside somebody else's move would make that report a lie.
+        var stuck = unnamed.Select(x => x.File.Id).ToHashSet();
         var placed = real.SelectMany(g => g.Select(x => x.File.Id)).ToHashSet();
         var orphans = real.Count == 1
-            ? model.Files.Where(f => !placed.Contains(f.Id)).ToList()
+            ? model.Files.Where(f => !placed.Contains(f.Id) && !stuck.Contains(f.Id)).ToList()
             : [];
 
         foreach (var group in real.OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
@@ -629,7 +785,61 @@ public class OrganizePlanner(
                 FileIds = [.. files.Select(f => f.Id)],
                 Fallbacks = FallbacksIn(rules.FolderTemplate, tokens),
                 Numberings = renaming.Numberings,
+                Tokens = Explain(rules.FolderTemplate, tokens),
+                Variants = VariantsIn(files),
+                Landing = LandingIn(files),
             };
+        }
+
+        // Files the reading placed nowhere, in a folder that held several
+        // sculpts: a readme covering the whole pack, a licence for everything
+        // in it. Filing them under whichever mini sorted first would be a
+        // guess, so they used to stay exactly where they were -- which left the
+        // pack folder standing, holding nothing but them.
+        //
+        // That husk then showed in Browse as a model with no models in it,
+        // beside the three sculpts that had just come out of it. Worse, a scan
+        // would not have made it: a folder becomes a model by holding a mesh,
+        // and this one no longer does. So organizing was leaving behind a row
+        // the scanner would never create.
+        //
+        // Rendered with no sculpt, which is this same template one level up --
+        // the folder every mini from this pack now shares, and the thing the
+        // readme was describing. Nothing is guessed: it is where the pack went.
+        if (real.Count > 1)
+        {
+            var leftovers = model.Files
+                .Where(f => !placed.Contains(f.Id) && !stuck.Contains(f.Id))
+                .ToList();
+
+            if (leftovers.Count > 0)
+            {
+                var shared = TokensFor(model);
+                shared["sculpt"] = null;
+
+                var home = PathTemplate.Render(
+                    rules.FolderTemplate, shared, forFile: false, rules.FolderCase);
+
+                // An empty result means the template was nothing but {sculpt},
+                // so there is no shared folder to speak of and the library root
+                // is not an answer. Staying put is better than the root.
+                if (home.Length > 0 && home != model.RelativePath)
+                {
+                    var carrying = PlanRenames(model, rules, leftovers);
+
+                    yield return new PlannedMove(
+                        model.Id, model.Name, model.RelativePath, home,
+                        MoveOutcome.Move, Renames: carrying.Renames)
+                    {
+                        FileIds = [.. leftovers.Select(f => f.Id)],
+                        Fallbacks = FallbacksIn(rules.FolderTemplate, shared),
+                        Numberings = carrying.Numberings,
+                        Tokens = Explain(rules.FolderTemplate, shared),
+                        Variants = VariantsIn(leftovers),
+                        Landing = LandingIn(leftovers),
+                    };
+                }
+            }
         }
     }
 
@@ -903,7 +1113,12 @@ public class OrganizePlanner(
         ["model"] = model.Name,
         ["designer"] = model.Designer?.Name,
         ["source"] = model.SourceSite,
-        ["collection"] = model.Collections.OrderBy(c => c.Name).FirstOrDefault()?.Name,
+        // The starred one, not the first alphabetically. A model can be in any
+        // number of collections and lives in exactly one folder, and sorting by
+        // name meant a collection called "Archive" quietly outranked the one
+        // somebody actually organises by -- so adding a model to a new
+        // collection could move it on disk for a reason nobody could see.
+        ["collection"] = model.PrimaryCollection?.Name,
         ["tag"] = model.Tags.OrderBy(t => t.Name).FirstOrDefault()?.Name,
         ["year"] = model.AddedUtc.Year.ToString(),
         ["license"] = model.License,

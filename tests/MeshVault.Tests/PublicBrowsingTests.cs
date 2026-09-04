@@ -99,12 +99,15 @@ public class PublicBrowsingTests : IDisposable
     {
         // Not merely hidden: the per-user queries must find nothing for them,
         // whatever anyone else has created.
-        var alice = new ModelEditor(_factory, new SignedInUser(new FixedContext(SignedIn("alice"))));
-        await alice.CreateCollectionAsync("Alice's list");
+        //
+        // Favorites, not collections. Collections stopped being owned when they
+        // started naming folders on disk, so they are library metadata now and
+        // a visitor sees them the way they already see tags and designers.
+        var id = await FavoritedModelAsync("alice");
 
         var anonymous = new ModelCatalog(_factory, new SignedInUser(new FixedContext(SignedOut())));
 
-        Assert.Empty(await anonymous.GetCollectionsAsync());
+        Assert.False((await anonymous.GetAsync(id))!.IsFavorite);
     }
 
     [Fact]
@@ -112,12 +115,39 @@ public class PublicBrowsingTests : IDisposable
     {
         // Rows owned by the pre-accounts stand-in must not resurface just
         // because somebody browsed without signing in.
-        var local = new ModelEditor(_factory, new LocalUser());
-        await local.CreateCollectionAsync("Left over from before accounts");
+        var id = await FavoritedModelAsync(Users.LocalUserId);
 
         var anonymous = new ModelCatalog(_factory, new SignedInUser(new FixedContext(SignedOut())));
 
-        Assert.Empty(await anonymous.GetCollectionsAsync());
+        Assert.False((await anonymous.GetAsync(id))!.IsFavorite);
+    }
+
+    /// <summary>A model in the library, favourited by one account.</summary>
+    private async Task<int> FavoritedModelAsync(string userId)
+    {
+        await using var db = _factory.CreateDbContext();
+        db.Libraries.Add(new Library { Name = "L", Path = "/l" });
+        var model = new ModelEntry { LibraryId = 1, Name = "M", RelativePath = "m" };
+        db.Models.Add(model);
+        await db.SaveChangesAsync();
+
+        db.Favorites.Add(new ModelFavorite { ModelEntryId = model.Id, UserId = userId });
+        await db.SaveChangesAsync();
+        return model.Id;
+    }
+
+    [Fact]
+    public async Task An_anonymous_visitor_sees_the_librarys_collections()
+    {
+        // The other side of the same change, stated so it cannot regress into
+        // the old behaviour unnoticed: a public library shows its collections
+        // to visitors, exactly as it shows its tags.
+        var alice = new ModelEditor(_factory, new SignedInUser(new FixedContext(SignedIn("alice"))));
+        await alice.CreateCollectionAsync("Terrain");
+
+        var anonymous = new ModelCatalog(_factory, new SignedInUser(new FixedContext(SignedOut())));
+
+        Assert.Equal("Terrain", Assert.Single(await anonymous.GetCollectionsAsync()).Collection.Name);
     }
 
     // Whether they get in at all ---------------------------------------------

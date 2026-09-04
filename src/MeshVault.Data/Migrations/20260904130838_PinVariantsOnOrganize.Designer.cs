@@ -3,6 +3,7 @@ using System;
 using MeshVault.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace MeshVault.Data.Migrations
 {
     [DbContext(typeof(MeshVaultDbContext))]
-    partial class MeshVaultDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260904130838_PinVariantsOnOrganize")]
+    partial class PinVariantsOnOrganize
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.11");
@@ -53,9 +56,14 @@ namespace MeshVault.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("OwnerId")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("NormalizedName")
+                    b.HasIndex("OwnerId", "NormalizedName")
                         .IsUnique();
 
                     b.ToTable("Collections");
@@ -190,9 +198,6 @@ namespace MeshVault.Data.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("TEXT");
 
-                    b.Property<int?>("PrimaryCollectionId")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("RelativePath")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -227,8 +232,6 @@ namespace MeshVault.Data.Migrations
                     b.HasIndex("DesignerId");
 
                     b.HasIndex("Name");
-
-                    b.HasIndex("PrimaryCollectionId");
 
                     b.HasIndex("SourceSite");
 
@@ -954,11 +957,6 @@ namespace MeshVault.Data.Migrations
                         .HasForeignKey("LibraryId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.HasOne("MeshVault.Core.Models.Collection", null)
-                        .WithMany()
-                        .HasForeignKey("PrimaryCollectionId")
-                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Designer");
 

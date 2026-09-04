@@ -31,10 +31,23 @@ public static class PathTemplate
         // pack folder holding ninety-eight minis becomes ninety-eight folders,
         // and four folders holding one mini between them become one. Both are
         // the same rule: a sculpt gets a folder, and its exports live in it.
+        //
+        // Falls back to nothing rather than to a word, for the reason {variant}
+        // does: it is read off the file rather than being a property of the
+        // model that happens to be missing. A file whose name never said which
+        // mini it is has no sculpt to shelve it under, and "Unsorted" inside a
+        // filename states something the app does not know. The planner stops
+        // such a file before a folder template can reach this, so what is left
+        // here is naming, where a gap should simply close up.
         new("sculpt", "The mini, read from the file's name — a pack splits into one folder each",
-            "Unsorted"),
+            ""),
         new("source", "Where it came from, such as MakerWorld", "Unknown source"),
-        new("collection", "Your first collection containing it", "Unfiled"),
+        // Falls back to nothing, so the level closes up rather than filling a
+        // folder called "Unfiled" with most of the library. A model in no
+        // collection is not waiting to be put somewhere -- it simply is not
+        // filed by collection, which is a shape the path can express by not
+        // having that level at all.
+        new("collection", "The collection you starred on it — the level closes up without one", ""),
         new("tag", "Its first tag, alphabetically", "Untagged"),
         new("year", "The year it was added to MeshVault", "Undated"),
         new("license", "Its licence", "Unlicensed"),

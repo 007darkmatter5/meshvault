@@ -24,9 +24,9 @@ public record OrganizePreset(string Name, string Summary, string Example, Organi
 /// catch it. A preset is the right unit precisely because it fixes all of that
 /// at once.
 ///
-/// Renaming appears in exactly one preset. It is the only choice here that
-/// destroys something, so it should be picked deliberately rather than met as a
-/// switch while exploring.
+/// Renaming appears only in the last presets on the ladder. It is the only
+/// choice here that destroys something, so it should be reached deliberately
+/// rather than met as a switch while exploring.
 /// </remarks>
 public static class OrganizePresets
 {
@@ -72,6 +72,28 @@ public static class OrganizePresets
                 // it keeps were already unique on disk, so no file ends up
                 // meaninglessly numbered "(2)".
                 FileTemplate = "{file}",
+                FileCase = NameCase.Kebab,
+            }),
+
+        // The one rung past "keep the creator's name". Everything above this
+        // preserves what the creator encoded; this rebuilds the name from what
+        // MeshVault read, and is therefore wrong wherever the reading is --
+        // which is why it sits last rather than replacing the preset above it.
+        //
+        // The two dashes are the whole point: "wall-no-logo" cannot say whether
+        // the sculpt is "Wall" or "Wall No", and "wall--no-logo" can. Sanitize
+        // trims the separator off a file with no variants, so a plain export is
+        // "ud-067-hole-trap" rather than "ud-067-hole-trap--".
+        new("Rebuild the names",
+            "Renames every file to its sculpt and the variants that make it "
+            + "unique. The only preset that discards what the creator wrote, so "
+            + "check the sculpts on a model page first -- Undo keeps the old names.",
+            "Dungeon Blocks/The Ultimate Dungeon/UD 067 Hole Trap/ud-067-hole-trap--hollowed.stl",
+            new OrganizeRules
+            {
+                FolderTemplate = "{designer}/{collection}/{sculpt}",
+                RenameFiles = true,
+                FileTemplate = $"{{sculpt}}{NameCasing.VariantSeparator}{{variant}}",
                 FileCase = NameCase.Kebab,
             }),
     ];

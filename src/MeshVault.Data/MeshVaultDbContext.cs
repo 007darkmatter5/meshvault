@@ -48,6 +48,17 @@ public class MeshVaultDbContext(DbContextOptions<MeshVaultDbContext> options)
             // Removing a designer must not take their models with them.
             e.HasOne(x => x.Designer).WithMany(x => x.Models)
                 .HasForeignKey(x => x.DesignerId).OnDelete(DeleteBehavior.SetNull);
+
+            // Computed from the memberships already loaded, so there is nothing
+            // for EF to read or write. Left mapped it would be taken for a
+            // second navigation to Collection and fight the many-to-many.
+            e.Ignore(x => x.PrimaryCollection);
+
+            // A real foreign key without a navigation, so deleting a collection
+            // clears the stars pointing at it rather than leaving models filed
+            // under something that no longer exists.
+            e.HasOne<Collection>().WithMany()
+                .HasForeignKey(x => x.PrimaryCollectionId).OnDelete(DeleteBehavior.SetNull);
         });
 
         b.Entity<ModelFile>(e =>
@@ -85,10 +96,11 @@ public class MeshVaultDbContext(DbContextOptions<MeshVaultDbContext> options)
         b.Entity<Collection>(e =>
         {
             e.Property(x => x.Name).HasMaxLength(200);
-            e.Property(x => x.OwnerId).HasMaxLength(450);
-            // Two people may each have a collection called "To Print", but one
-            // person may not have both "To Print" and "to print".
-            e.HasIndex(x => new { x.OwnerId, x.NormalizedName }).IsUnique();
+            // Shared, so one name is one collection for the whole library --
+            // and "To Print" and "to print" cannot both exist. They used to be
+            // unique per owner, which is what let two accounts hold two
+            // collections of the same name and file one library two ways.
+            e.HasIndex(x => x.NormalizedName).IsUnique();
         });
 
         b.Entity<Setting>(e =>

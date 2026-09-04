@@ -26,6 +26,7 @@ public class VariantReindexer(
     VariantRules rules,
     VariantStore definitions,
     SettingsStore settings,
+    GroupReconciler groups,
     ILogger<VariantReindexer> log)
 {
     /// <summary>Models held in memory at once. Keeps a large library off the heap.</summary>
@@ -49,6 +50,12 @@ public class VariantReindexer(
             return new ReindexResult(0, 0);
 
         var result = await ReclassifyAllAsync(ct);
+
+        // Groups are read from sculpt keys, and this pass is the one thing that
+        // rewrites them wholesale. Skipping it would leave Browse folding
+        // together models the vocabulary no longer says are the same sculpt.
+        await groups.ReconcileAllAsync(ct);
+
         await settings.SetStringAsync(SettingKeys.VariantRulesVersion, fingerprint, ct);
 
         if (result.Any)
@@ -81,6 +88,12 @@ public class VariantReindexer(
         var repointed = RepointCardImage(model) ? 1 : 0;
 
         await db.SaveChangesAsync(ct);
+
+        // One model's sculpt changing can make or break a group, and the group
+        // it joins or leaves is elsewhere in the library -- so the whole library
+        // is settled rather than this row.
+        if (reclassified > 0) await groups.ReconcileAsync(model.LibraryId, ct);
+
         return new ReindexResult(reclassified, repointed);
     }
 

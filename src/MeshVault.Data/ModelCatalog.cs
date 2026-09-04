@@ -110,11 +110,12 @@ public class ModelCatalog(IDbContextFactory<MeshVaultDbContext> factory, ICurren
         if (query.MissingSource)
             models = models.Where(m => m.SourceUrl == null);
 
-        // Yours, not anyone's. Collections belong to an account, so "in no
-        // collection" has to mean the asker's own — a model somebody else filed
-        // is still unfiled as far as this question goes.
+        // One answer for everybody, now that collections are shared. This used
+        // to mean "in none of the asker's own collections", so the same model
+        // read as unfiled or filed depending on who asked -- which was the same
+        // split that let two accounts organise one library two ways.
         if (query.MissingCollection)
-            models = models.Where(m => !m.Collections.Any(c => c.OwnerId == userId));
+            models = models.Where(m => !m.Collections.Any());
 
         // Unfiled is a fact about where a model sits, not a flag on it, so it is
         // asked of the path against its own library's inbox rather than stored.
@@ -164,7 +165,7 @@ public class ModelCatalog(IDbContextFactory<MeshVaultDbContext> factory, ICurren
             .Include(m => m.Files)
             .Include(m => m.Library)
             .Include(m => m.Designer)
-            .Include(m => m.Collections.Where(c => c.OwnerId == userId))
+            .Include(m => m.Collections)
             .FirstOrDefaultAsync(m => m.Id == id, ct);
 
         if (model is null) return null;
@@ -255,10 +256,8 @@ public class ModelCatalog(IDbContextFactory<MeshVaultDbContext> factory, ICurren
     public async Task<List<(Collection Collection, int Count)>> GetCollectionsAsync(CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        var userId = user.UserId;
         var rows = await db.Collections
             .AsNoTracking()
-            .Where(c => c.OwnerId == userId)
             .Select(c => new { Collection = c, Count = c.Models.Count })
             .OrderBy(x => x.Collection.Name)
             .ToListAsync(ct);

@@ -3,60 +3,17 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MeshVault.Data;
 
-/// <summary>Applies and undoes variant groupings.</summary>
+/// <summary>
+/// Reads a grouping. <see cref="GroupReconciler"/> is what writes one.
+/// </summary>
 /// <remarks>
-/// Every operation here is a write to three columns. No file is touched, no row
-/// is deleted, and each member keeps its own folder, files and metadata — which
-/// is what makes ungrouping a complete undo rather than a best effort.
+/// Purely questions now. This used to apply and undo groupings chosen on a page
+/// of its own; grouping is derived from the files instead, so there is nothing
+/// left to approve and nothing to undo -- correcting a sculpt is how a grouping
+/// is changed.
 /// </remarks>
 public class GroupStore(IDbContextFactory<MeshVaultDbContext> factory)
 {
-    /// <summary>Applies the chosen proposals. Returns how many models were grouped.</summary>
-    public async Task<int> ApplyAsync(
-        IEnumerable<GroupProposal> proposals, CancellationToken ct = default)
-    {
-        var wanted = proposals.ToList();
-        if (wanted.Count == 0) return 0;
-
-        await using var db = await factory.CreateDbContextAsync(ct);
-
-        var ids = wanted.SelectMany(p => p.Members.Select(m => m.ModelId)).ToHashSet();
-        var models = await db.Models.Where(m => ids.Contains(m.Id)).ToDictionaryAsync(m => m.Id, ct);
-
-        var grouped = 0;
-        foreach (var proposal in wanted)
-        {
-            var primary = proposal.Primary.ModelId;
-            foreach (var member in proposal.Members)
-            {
-                if (!models.TryGetValue(member.ModelId, out var model)) continue;
-
-                model.GroupKey = proposal.Key;
-                model.GroupName = proposal.Name;
-                model.GroupPrimary = model.Id == primary;
-                grouped++;
-            }
-        }
-
-        await db.SaveChangesAsync(ct);
-        return grouped;
-    }
-
-    /// <summary>
-    /// Breaks a group apart, returning every member to standing on its own.
-    /// </summary>
-    public async Task<int> UngroupAsync(int libraryId, string groupKey, CancellationToken ct = default)
-    {
-        await using var db = await factory.CreateDbContextAsync(ct);
-
-        return await db.Models
-            .Where(m => m.LibraryId == libraryId && m.GroupKey == groupKey)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(m => m.GroupKey, (string?)null)
-                .SetProperty(m => m.GroupName, (string?)null)
-                .SetProperty(m => m.GroupPrimary, false), ct);
-    }
-
     /// <summary>Every model in the same group as <paramref name="modelId"/>, itself included.</summary>
     /// <remarks>
     /// The single place that answers "what does this model stand for", so

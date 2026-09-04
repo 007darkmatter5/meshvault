@@ -28,6 +28,11 @@ public class ScanServiceTests : IDisposable
         services.AddSingleton<FolderScanner>();
         services.AddSingleton<VariantClassifier>();
         services.AddScoped<LibraryIndexer>();
+
+        // A scan settles the groupings it just changed, so the service resolves
+        // this and fails the whole scan without it -- which is how the missing
+        // registration showed up here rather than in the app.
+        services.AddScoped<GroupReconciler>();
         _services = services.BuildServiceProvider();
 
         using var db = _services.GetRequiredService<IDbContextFactory<MeshVaultDbContext>>().CreateDbContext();

@@ -106,37 +106,139 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
     /// The sculpt key is normalised the same way the classifier does it, so a
     /// file moved here lands in the same group as one that was detected.
     /// </remarks>
-    public async Task SetVariantAsync(
+    public Task SetVariantAsync(
         int fileId, string sculptName, IEnumerable<VariantDefinition> labels,
+        CancellationToken ct = default) =>
+        SetSculptAsync([fileId], sculptName, labels, ct);
+
+    /// <summary>
+    /// Says by hand which sculpt some files are exports of, and which flavour.
+    /// Returns how many files were changed.
+    /// </summary>
+    /// <remarks>
+    /// Naming several files at once is what moving a stray export into the
+    /// right sculpt actually is, and doing it a file at a time meant retyping
+    /// the same name identically or quietly creating a second sculpt one letter
+    /// different from the first.
+    /// </remarks>
+    public async Task<int> SetSculptAsync(
+        IEnumerable<int> fileIds, string sculptName, IEnumerable<VariantDefinition> labels,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(sculptName)) return;
+        if (string.IsNullOrWhiteSpace(sculptName)) return 0;
 
-        var chosen = labels.OrderBy(d => d.PreviewRank).ToList();
+        var ids = fileIds.ToList();
+        if (ids.Count == 0) return 0;
+
+        // Alphabetical, matching what detection produces, so a file corrected by
+        // hand and one read from its name render the same way in a template.
+        var chosen = labels.OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).ToList();
         var name = sculptName.Trim();
         var key = VariantClassifier.NormalizeKey(name);
         var label = chosen.Count == 0 ? null : string.Join(", ", chosen.Select(d => d.Name));
         var rank = chosen.Sum(d => d.PreviewRank);
 
         await using var db = await factory.CreateDbContextAsync(ct);
-        await db.Files.Where(f => f.Id == fileId)
+        return await db.Files.Where(f => ids.Contains(f.Id))
             .ExecuteUpdateAsync(s => s
                 .SetProperty(f => f.SculptKey, key)
                 .SetProperty(f => f.SculptName, name)
                 .SetProperty(f => f.VariantLabel, label)
                 .SetProperty(f => f.VariantRank, rank)
-                .SetProperty(f => f.VariantSetByUser, true), ct);
+                .SetProperty(f => f.VariantSetByUser, true)
+
+                // A hand-set sculpt outranks the pin organizing leaves behind,
+                // so clearing it keeps one flag meaning one thing: this row was
+                // decided by a person.
+                .SetProperty(f => f.VariantSetByOrganize, false), ct);
+    }
+
+    /// <summary>
+    /// Renames a sculpt everywhere it appears in a model and its group.
+    /// Returns how many files were changed.
+    /// </summary>
+    /// <remarks>
+    /// The operation that was missing entirely: a sculpt with six exports could
+    /// only be renamed by editing six files and typing the same name into each,
+    /// where one slip left two sculpts a letter apart and no way to see why they
+    /// no longer grouped.
+    ///
+    /// Renaming onto a name another sculpt already has **merges** the two -- the
+    /// key is what groups, and two files carrying one key are one sculpt. That
+    /// is the same operation seen from the other end rather than a special case,
+    /// so there is no separate merge to get subtly different.
+    /// </remarks>
+    public async Task<int> RenameSculptAsync(
+        int modelId, string sculptKey, string newName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(sculptKey) || string.IsNullOrWhiteSpace(newName)) return 0;
+
+        var name = newName.Trim();
+        var key = VariantClassifier.NormalizeKey(name);
+
+        await using var db = await factory.CreateDbContextAsync(ct);
+
+        // The whole group, because the page that offers this shows the group as
+        // one thing -- renaming a sculpt on screen and leaving the same sculpt
+        // named differently in a sibling folder would split the group in two.
+        var models = await GroupStore.MemberIdsAsync(db, modelId, ct);
+
+        return await db.Files
+            .Where(f => models.Contains(f.ModelEntryId) && f.SculptKey == sculptKey)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(f => f.SculptKey, key)
+                .SetProperty(f => f.SculptName, name)
+                .SetProperty(f => f.VariantSetByUser, true)
+                .SetProperty(f => f.VariantSetByOrganize, false), ct);
+    }
+
+    /// <summary>
+    /// Sets which variants some files are, leaving the sculpt each belongs to
+    /// alone. Returns how many were changed.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="SetSculptAsync"/> because the two are
+    /// different questions asked of the same rows: which mini this is, and which
+    /// cut of it. Marking four files supported in one go must not quietly move
+    /// them all into one sculpt.
+    /// </remarks>
+    public async Task<int> SetVariantsAsync(
+        IEnumerable<int> fileIds, IEnumerable<VariantDefinition> labels,
+        CancellationToken ct = default)
+    {
+        var ids = fileIds.ToList();
+        if (ids.Count == 0) return 0;
+
+        var chosen = labels.OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var label = chosen.Count == 0 ? null : string.Join(", ", chosen.Select(d => d.Name));
+        var rank = chosen.Sum(d => d.PreviewRank);
+
+        await using var db = await factory.CreateDbContextAsync(ct);
+        return await db.Files.Where(f => ids.Contains(f.Id))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(f => f.VariantLabel, label)
+                .SetProperty(f => f.VariantRank, rank)
+                .SetProperty(f => f.VariantSetByUser, true)
+                .SetProperty(f => f.VariantSetByOrganize, false), ct);
     }
 
     /// <summary>
     /// Drops a hand-set sculpt and variant, handing the file back to detection.
     /// Takes effect on the next pass, which the caller runs.
     /// </summary>
+    /// <remarks>
+    /// Clears the organize pin as well. Asking for detection back and being
+    /// handed the values organizing froze would be the same answer under a
+    /// different name -- and where the two disagree, the person asking is the
+    /// one who gets to be right.
+    /// </remarks>
     public async Task ResetVariantAsync(int fileId, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         await db.Files.Where(f => f.Id == fileId)
-            .ExecuteUpdateAsync(s => s.SetProperty(f => f.VariantSetByUser, false), ct);
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(f => f.VariantSetByUser, false)
+                .SetProperty(f => f.VariantSetByOrganize, false), ct);
     }
 
     public async Task SetLicenseAsync(int modelId, string? license, CancellationToken ct = default)
@@ -387,15 +489,14 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
         var trimmed = name.Trim();
         var normalized = trimmed.ToLowerInvariant();
 
-        if (await db.Collections.AnyAsync(c => c.OwnerId == userId && c.NormalizedName == normalized, ct))
-            throw new InvalidOperationException($"You already have a collection called \"{trimmed}\".");
+        if (await db.Collections.AnyAsync(c => c.NormalizedName == normalized, ct))
+            throw new InvalidOperationException($"There is already a collection called \"{trimmed}\".");
 
         var collection = new Collection
         {
             Name = trimmed,
             NormalizedName = normalized,
             Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
-            OwnerId = userId,
             CreatedUtc = DateTimeOffset.UtcNow,
         };
         db.Collections.Add(collection);
@@ -411,7 +512,7 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
         await using var db = await factory.CreateDbContextAsync(ct);
         var userId = user.UserId;
         var collection = await db.Collections
-            .FirstOrDefaultAsync(c => c.Id == collectionId && c.OwnerId == userId, ct);
+            .FirstOrDefaultAsync(c => c.Id == collectionId, ct);
         if (collection is null) return;
 
         var trimmed = name.Trim();
@@ -419,8 +520,8 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
 
         if (normalized != collection.NormalizedName
             && await db.Collections.AnyAsync(
-                c => c.OwnerId == userId && c.NormalizedName == normalized && c.Id != collectionId, ct))
-            throw new InvalidOperationException($"You already have a collection called \"{trimmed}\".");
+                c => c.NormalizedName == normalized && c.Id != collectionId, ct))
+            throw new InvalidOperationException($"There is already a collection called \"{trimmed}\".");
 
         collection.Name = trimmed;
         collection.NormalizedName = normalized;
@@ -433,49 +534,110 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
         await using var db = await factory.CreateDbContextAsync(ct);
         var userId = user.UserId;
         await db.Collections
-            .Where(c => c.Id == collectionId && c.OwnerId == userId)
+            .Where(c => c.Id == collectionId)
             .ExecuteDeleteAsync(ct);
     }
 
-    /// <summary>Adds or removes a model from one of the current user's collections.</summary>
+    /// <summary>Adds or removes a model from a collection.</summary>
     public async Task SetCollectionMembershipAsync(int modelId, int collectionId, bool member,
         CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        var userId = user.UserId;
 
-        var collection = await db.Collections
-            .Include(c => c.Models)
-            .FirstOrDefaultAsync(c => c.Id == collectionId && c.OwnerId == userId, ct);
+        var collection = await db.Collections.FirstOrDefaultAsync(c => c.Id == collectionId, ct);
         if (collection is null) return;
 
         // Whole group in or whole group out, for the same reason as favourites:
         // the collection lists one card per group, so partial membership would
         // show or hide it depending on which member is primary.
         var ids = await GroupStore.MemberIdsAsync(db, modelId, ct);
+
+        // Worked from the model's side rather than the collection's, and with
+        // its memberships loaded, because the star that decides which
+        // collection names its folder has to be settled against them.
+        var models = await db.Models
+            .Include(m => m.Collections)
+            .Where(m => ids.Contains(m.Id))
+            .ToListAsync(ct);
+
         var changed = false;
-
-        if (member)
+        foreach (var model in models)
         {
-            var missing = ids.Where(id => collection.Models.All(m => m.Id != id)).ToList();
-            if (missing.Count == 0) return;
+            if (member == model.Collections.Any(c => c.Id == collectionId)) continue;
 
-            foreach (var model in await db.Models.Where(m => missing.Contains(m.Id)).ToListAsync(ct))
-            {
-                collection.Models.Add(model);
-                changed = true;
-            }
-        }
-        else
-        {
-            foreach (var model in collection.Models.Where(m => ids.Contains(m.Id)).ToList())
-            {
-                collection.Models.Remove(model);
-                changed = true;
-            }
+            // Read before the memberships move underneath it: this is the
+            // collection that was naming the folder a moment ago.
+            var was = model.PrimaryCollection;
+
+            if (member) model.Collections.Add(collection);
+            else model.Collections.Remove(model.Collections.First(c => c.Id == collectionId));
+
+            SettleStar(model, was);
+            changed = true;
         }
 
         if (!changed) return;
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Keeps the star that names a model's folder honest across a change of
+    /// membership.
+    /// </summary>
+    /// <remarks>
+    /// A model in exactly one collection needs no star: that collection is
+    /// implicitly primary, and storing it would be another value to keep in
+    /// step for no gain. The moment a second arrives, that implicit choice has
+    /// to be written down -- otherwise the model has two collections and no
+    /// star, the folder level collapses, and adding a model to a second
+    /// collection would quietly un-file it on the next organize.
+    ///
+    /// Leaving the starred collection clears the star rather than moving it.
+    /// Which of the survivors should name the folder is not something to guess
+    /// at, and a model with no star files without the level at all -- a shape
+    /// somebody can see on the page and correct, rather than a choice made for
+    /// them.
+    /// </remarks>
+    private static void SettleStar(ModelEntry model, Collection? was)
+    {
+        if (model.Collections.Count <= 1)
+        {
+            model.PrimaryCollectionId = null;
+            return;
+        }
+
+        if (model.Collections.Any(c => c.Id == model.PrimaryCollectionId)) return;
+
+        model.PrimaryCollectionId =
+            was is not null && model.Collections.Any(c => c.Id == was.Id) ? was.Id : null;
+    }
+
+    /// <summary>
+    /// Stars the collection that names this model's folder, or clears it.
+    /// </summary>
+    /// <remarks>
+    /// Only a collection the model is actually in. A star pointing outside the
+    /// memberships would name a folder the model has no other claim to, and
+    /// <see cref="ModelEntry.PrimaryCollection"/> would ignore it anyway --
+    /// leaving the page showing a choice that does nothing.
+    /// </remarks>
+    public async Task SetPrimaryCollectionAsync(int modelId, int? collectionId,
+        CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+
+        var ids = await GroupStore.MemberIdsAsync(db, modelId, ct);
+        var models = await db.Models
+            .Include(m => m.Collections)
+            .Where(m => ids.Contains(m.Id))
+            .ToListAsync(ct);
+
+        foreach (var model in models)
+        {
+            model.PrimaryCollectionId =
+                collectionId is { } id && model.Collections.Any(c => c.Id == id) ? id : null;
+        }
+
         await db.SaveChangesAsync(ct);
     }
 
@@ -570,32 +732,32 @@ public class ModelEditor(IDbContextFactory<MeshVaultDbContext> factory, ICurrent
         // Collection --------------------------------------------------------
         if (edit.CollectionId is { } collectionId)
         {
-            var collection = await db.Collections
-                .Include(c => c.Models)
-                .FirstOrDefaultAsync(c => c.Id == collectionId && c.OwnerId == userId, ct);
+            var collection = await db.Collections.FirstOrDefaultAsync(c => c.Id == collectionId, ct);
 
             if (collection is not null)
             {
-                if (edit.RemoveFromCollection)
-                {
-                    foreach (var model in collection.Models.Where(m => ids.Contains(m.Id)).ToList())
-                    {
-                        collection.Models.Remove(model);
-                        collectionChanged++;
-                    }
-                }
-                else
-                {
-                    var present = collection.Models.Select(m => m.Id).ToHashSet();
-                    var missing = await db.Models
-                        .Where(m => ids.Contains(m.Id) && !present.Contains(m.Id))
-                        .ToListAsync(ct);
+                // From the model's side, with memberships loaded, so the star
+                // that names each folder is settled the same way a single edit
+                // settles it. Doing it per collection instead would leave a
+                // few hundred models with two collections and no star, and the
+                // next organize would un-file every one of them.
+                var affected = await db.Models
+                    .Include(m => m.Collections)
+                    .Where(m => ids.Contains(m.Id))
+                    .ToListAsync(ct);
 
-                    foreach (var model in missing)
-                    {
-                        collection.Models.Add(model);
-                        collectionChanged++;
-                    }
+                foreach (var model in affected)
+                {
+                    var member = !edit.RemoveFromCollection;
+                    if (member == model.Collections.Any(c => c.Id == collectionId)) continue;
+
+                    var was = model.PrimaryCollection;
+
+                    if (member) model.Collections.Add(collection);
+                    else model.Collections.Remove(model.Collections.First(c => c.Id == collectionId));
+
+                    SettleStar(model, was);
+                    collectionChanged++;
                 }
 
                 await db.SaveChangesAsync(ct);

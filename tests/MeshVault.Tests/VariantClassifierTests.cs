@@ -7,8 +7,8 @@ public class VariantClassifierTests
 {
     private readonly VariantClassifier _classifier = new();
 
-    private (string Key, string? Label) Read(string path, string model = "Pack") =>
-        _classifier.Classify(model, path) is var r ? (r.Key, r.Label) : default;
+    private (string? Key, string? Label) Read(string path) =>
+        _classifier.Classify(path) is var r ? (r.Key, r.Label) : default;
 
     [Theory]
     // The spellings creators actually ship, all meaning the same two things.
@@ -56,16 +56,45 @@ public class VariantClassifierTests
     }
 
     [Fact]
-    public void Falls_back_to_the_model_name_when_the_file_says_nothing_else()
+    public void A_name_that_is_only_variant_words_gets_no_sculpt()
     {
-        // "Tavern/supported.stl" carries no sculpt name of its own. Keying it on
-        // the word "supported" would leave it unable to find its own twin.
-        var supported = Read("supported.stl", model: "Tavern");
-        var unsupported = Read("unsupported.stl", model: "Tavern");
+        // "presupported.stl" says which flavour it is and never which mini.
+        // This used to borrow the containing model's name, which read well for
+        // "Tavern/supported.stl" and disastrously for anything dropped into a
+        // container: a loose download in the inbox came back as a sculpt called
+        // "inbox", and every other loose download joined it.
+        //
+        // The variant is still read. Losing that as well would throw away the
+        // one thing the name did say.
+        var supported = Read("supported.stl");
+        var unsupported = Read("unsupported.stl");
 
-        Assert.Equal("tavern", supported.Key);
-        Assert.Equal(supported.Key, unsupported.Key);
-        Assert.NotEqual(supported.Label, unsupported.Label);
+        Assert.Null(supported.Key);
+        Assert.Null(unsupported.Key);
+        Assert.Equal("Supported", supported.Label);
+        Assert.Equal("Unsupported", unsupported.Label);
+    }
+
+    [Fact]
+    public void A_container_folder_never_becomes_a_sculpt_name()
+    {
+        // The shape the bug actually arrived in: a file dropped straight into
+        // the inbox, which directly contains a mesh and so becomes a model
+        // named after itself.
+        var entry = new ModelEntry { RelativePath = "inbox", Name = "inbox" };
+        var file = new ModelFile
+        {
+            RelativePath = "inbox/presupported.stl",
+            FileName = "presupported.stl",
+            Extension = ".stl",
+            Kind = FileKind.Mesh,
+        };
+
+        _classifier.Apply(entry, file);
+
+        Assert.Null(file.SculptKey);
+        Assert.Null(file.SculptName);
+        Assert.Equal("Supported", file.VariantLabel);
     }
 
     [Fact]
@@ -139,7 +168,7 @@ public class VariantClassifierTests
         ]);
 
         Assert.NotEqual(_classifier.Fingerprint(), custom.Fingerprint());
-        Assert.Equal("House style", custom.Classify("Pack", "Goblin_mysupports.stl").Label);
+        Assert.Equal("House style", custom.Classify("Goblin_mysupports.stl").Label);
     }
 
     [Fact]
@@ -148,7 +177,7 @@ public class VariantClassifierTests
         // Deleting every definition is allowed. Nothing should be labelled, and
         // the sculpt name should keep the words that would have been stripped.
         var bare = new VariantClassifier([]);
-        var read = bare.Classify("Pack", "Goblin_supported.stl");
+        var read = bare.Classify("Goblin_supported.stl");
 
         Assert.Null(read.Label);
         Assert.Equal("goblin supported", read.Key);
@@ -164,7 +193,7 @@ public class VariantClassifierTests
             new VariantDefinition { Name = "Unsupported", MatchTerms = "raw", PreviewRank = 1 },
         ]);
 
-        Assert.Equal("Unsupported", custom.Classify("Pack", "Goblin_raw.stl").Label);
+        Assert.Equal("Unsupported", custom.Classify("Goblin_raw.stl").Label);
     }
 
     [Fact]
@@ -214,7 +243,7 @@ public class VariantClassifierTests
         Assert.True(unsupported < supported);
         Assert.True(hollowed < Rank("Goblin_supported_hollowed.stl"));
 
-        int Rank(string file) => _classifier.Classify("Pack", file).Rank;
+        int Rank(string file) => _classifier.Classify(file).Rank;
     }
 
     [Fact]
@@ -228,8 +257,8 @@ public class VariantClassifierTests
             new VariantDefinition { Name = "Unsupported", MatchTerms = "unsupported", PreviewRank = 9 },
         ]);
 
-        Assert.True(custom.Classify("Pack", "Goblin_supported.stl").Rank
-                  < custom.Classify("Pack", "Goblin_unsupported.stl").Rank);
+        Assert.True(custom.Classify("Goblin_supported.stl").Rank
+                  < custom.Classify("Goblin_unsupported.stl").Rank);
     }
 
     [Fact]

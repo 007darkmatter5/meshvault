@@ -243,23 +243,33 @@ public class MetadataTests : IDisposable
         Assert.Equal(0, (await bob.SearchAsync(new ModelQuery { FavoritesOnly = true })).TotalCount);
     }
 
-    // Collections are per user ----------------------------------------------
+    // Collections belong to the library --------------------------------------
+    //
+    // They used to be owned by whoever made them. That made the layout of the
+    // share depend on who was signed in, because {collection} is a level in the
+    // folder template -- and it is why the app allowed exactly one
+    // administrator. A collection now describes the model, like a tag or a
+    // designer does. Favorites are the contrast and stay per-user.
 
     [Fact]
-    public async Task Two_users_may_each_have_a_collection_with_the_same_name()
+    public async Task One_name_is_one_collection_for_the_whole_library()
     {
         var alice = new ModelEditor(_factory, new FakeUser("alice"));
         var bob = new ModelEditor(_factory, new FakeUser("bob"));
 
         await alice.CreateCollectionAsync("To Print");
-        await bob.CreateCollectionAsync("To Print");
+
+        // Two "To Print" folders were the thing that let one library be filed
+        // two different ways at once.
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => bob.CreateCollectionAsync("to print "));
 
         await using var db = _factory.CreateDbContext();
-        Assert.Equal(2, await db.Collections.CountAsync());
+        Assert.Equal(1, await db.Collections.CountAsync());
     }
 
     [Fact]
-    public async Task One_user_may_not_reuse_their_own_collection_name()
+    public async Task A_collection_name_cannot_be_reused()
     {
         await _editor.CreateCollectionAsync("To Print");
 
@@ -268,29 +278,29 @@ public class MetadataTests : IDisposable
     }
 
     [Fact]
-    public async Task A_user_only_sees_their_own_collections()
+    public async Task Everybody_sees_the_same_collections()
     {
         await new ModelEditor(_factory, new FakeUser("alice")).CreateCollectionAsync("Alice list");
         await new ModelEditor(_factory, new FakeUser("bob")).CreateCollectionAsync("Bob list");
 
         var visible = await new ModelCatalog(_factory, new FakeUser("alice")).GetCollectionsAsync();
 
-        Assert.Equal("Alice list", Assert.Single(visible).Collection.Name);
+        Assert.Equal(["Alice list", "Bob list"], visible.Select(v => v.Collection.Name).Order());
     }
 
     [Fact]
-    public async Task A_user_cannot_add_models_to_someone_elses_collection()
+    public async Task Anybody_can_add_a_model_to_any_collection()
     {
         var id = await NewModel("A");
-        var bobsCollection = await new ModelEditor(_factory, new FakeUser("bob"))
-            .CreateCollectionAsync("Bob list");
+        var collection = await new ModelEditor(_factory, new FakeUser("bob"))
+            .CreateCollectionAsync("Terrain");
 
         await new ModelEditor(_factory, new FakeUser("alice"))
-            .SetCollectionMembershipAsync(id, bobsCollection.Id, true);
+            .SetCollectionMembershipAsync(id, collection.Id, true);
 
         await using var db = _factory.CreateDbContext();
-        var collection = await db.Collections.Include(c => c.Models).SingleAsync();
-        Assert.Empty(collection.Models);
+        var loaded = await db.Collections.Include(c => c.Models).SingleAsync();
+        Assert.Equal(id, Assert.Single(loaded.Models).Id);
     }
 
     [Fact]
@@ -306,6 +316,87 @@ public class MetadataTests : IDisposable
         await _editor.SetCollectionMembershipAsync(id, collection.Id, false);
         Assert.Equal(0, (await _catalog.SearchAsync(
             new ModelQuery { CollectionId = collection.Id })).TotalCount);
+    }
+
+    // Which collection names the folder ---------------------------------------
+
+    [Fact]
+    public async Task One_collection_is_primary_without_being_starred()
+    {
+        var id = await NewModel("A");
+        var toPrint = await _editor.CreateCollectionAsync("To Print");
+        await _editor.SetCollectionMembershipAsync(id, toPrint.Id, true);
+
+        var model = await LoadWithCollectionsAsync(id);
+
+        // Nothing to choose between, so nothing is stored -- a star here would
+        // be a second value to keep in step for no gain.
+        Assert.Null(model.PrimaryCollectionId);
+        Assert.Equal("To Print", model.PrimaryCollection?.Name);
+    }
+
+    [Fact]
+    public async Task Gaining_a_second_collection_stars_the_one_it_already_had()
+    {
+        // Otherwise the model would have two collections and no star, the
+        // {collection} level would collapse, and adding a model to a second
+        // collection would quietly un-file it on the next organize.
+        var id = await NewModel("A");
+        var dungeon = await _editor.CreateCollectionAsync("The Ultimate Dungeon");
+        await _editor.SetCollectionMembershipAsync(id, dungeon.Id, true);
+
+        var archive = await _editor.CreateCollectionAsync("Archive");
+        await _editor.SetCollectionMembershipAsync(id, archive.Id, true);
+
+        var model = await LoadWithCollectionsAsync(id);
+
+        Assert.Equal(dungeon.Id, model.PrimaryCollectionId);
+        Assert.Equal("The Ultimate Dungeon", model.PrimaryCollection?.Name);
+    }
+
+    [Fact]
+    public async Task Leaving_the_starred_collection_clears_the_star()
+    {
+        var id = await NewModel("A");
+        var dungeon = await _editor.CreateCollectionAsync("The Ultimate Dungeon");
+        var archive = await _editor.CreateCollectionAsync("Archive");
+        var printed = await _editor.CreateCollectionAsync("Printed");
+        foreach (var c in new[] { dungeon, archive, printed })
+            await _editor.SetCollectionMembershipAsync(id, c.Id, true);
+
+        await _editor.SetPrimaryCollectionAsync(id, dungeon.Id);
+        await _editor.SetCollectionMembershipAsync(id, dungeon.Id, false);
+
+        var model = await LoadWithCollectionsAsync(id);
+
+        // Two left and no way to know which should name the folder. Guessing is
+        // what the star exists to stop, so the level simply goes.
+        Assert.Null(model.PrimaryCollectionId);
+        Assert.Null(model.PrimaryCollection);
+    }
+
+    [Fact]
+    public async Task A_star_cannot_point_at_a_collection_the_model_is_not_in()
+    {
+        var id = await NewModel("A");
+        var mine = await _editor.CreateCollectionAsync("Mine");
+        var other = await _editor.CreateCollectionAsync("Somewhere else");
+        await _editor.SetCollectionMembershipAsync(id, mine.Id, true);
+
+        await _editor.SetPrimaryCollectionAsync(id, other.Id);
+
+        var model = await LoadWithCollectionsAsync(id);
+
+        // A star pointing outside the memberships would name a folder the model
+        // has no other claim to.
+        Assert.Null(model.PrimaryCollectionId);
+        Assert.Equal("Mine", model.PrimaryCollection?.Name);
+    }
+
+    private async Task<ModelEntry> LoadWithCollectionsAsync(int id)
+    {
+        await using var db = _factory.CreateDbContext();
+        return await db.Models.Include(m => m.Collections).SingleAsync(m => m.Id == id);
     }
 
     [Fact]

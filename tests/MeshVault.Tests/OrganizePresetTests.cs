@@ -41,23 +41,41 @@ public class OrganizePresetTests
     }
 
     [Fact]
-    public void Exactly_one_preset_renames()
+    public void Renaming_is_the_last_thing_the_ladder_offers()
     {
-        // Renaming is the only choice here that destroys something. Spreading
-        // it across several presets is how it stops being a deliberate pick.
-        Assert.Single(OrganizePresets.All, p => p.Rules.RenameFiles);
+        // Renaming is the only choice here that destroys something, so it
+        // belongs at the end, reached deliberately rather than met while
+        // exploring. Two presets rename now -- one keeps every original name and
+        // only fixes its case, the other rebuilds them -- and both have to sit
+        // after everything that merely moves files.
+        var renaming = OrganizePresets.All
+            .Select((preset, index) => (preset, index))
+            .Where(x => x.preset.Rules.RenameFiles)
+            .Select(x => x.index)
+            .ToList();
+
+        Assert.NotEmpty(renaming);
+        Assert.Equal(
+            Enumerable.Range(OrganizePresets.All.Count - renaming.Count, renaming.Count),
+            renaming);
     }
 
     [Fact]
-    public void The_preset_that_renames_keeps_what_the_original_name_encoded()
+    public void A_renaming_preset_never_throws_away_which_cut_of_a_mini_a_file_is()
     {
-        // The original name is the only record that a mesh was hollowed, and
-        // the creator's own shorthand for it beats anything reconstructed from
-        // our classification. A renaming preset that dropped {file} would have
-        // to rebuild that, and would be wrong wherever we guessed wrong.
-        var renaming = OrganizePresets.All.Single(p => p.Rules.RenameFiles);
+        // The original name is the only record that a mesh was hollowed. A
+        // preset may keep it with {file}, or rebuild it from {sculpt} and
+        // {variant} -- but one doing neither would quietly flatten every cut of
+        // a mini onto a single name, and then number the collisions.
+        foreach (var preset in OrganizePresets.All.Where(p => p.Rules.RenameFiles))
+        {
+            var template = preset.Rules.FileTemplate;
 
-        Assert.Contains("{file}", renaming.Rules.FileTemplate);
+            Assert.True(
+                template.Contains("{file}") || template.Contains("{variant}"),
+                $"\"{preset.Name}\" renames without keeping {{file}} or rendering "
+                + "{variant}, so which cut of a mini each file is would be lost.");
+        }
     }
 
     [Fact]

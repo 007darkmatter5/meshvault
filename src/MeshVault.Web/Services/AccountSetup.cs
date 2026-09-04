@@ -89,26 +89,26 @@ public class AccountSetup(
     }
 
     /// <summary>
-    /// Hands collections and favorites created before sign-in existed to the
-    /// first real account, so the owner does not lose them.
+    /// Hands favorites created before sign-in existed to the first real
+    /// account, so the owner does not lose them.
     /// </summary>
+    /// <remarks>
+    /// Collections used to be adopted here too. They are shared by the library
+    /// now, so there is no owner to transfer and nothing for the first account
+    /// to inherit -- they were never anyone's to begin with.
+    /// </remarks>
     private async Task AdoptLegacyDataAsync(string userId, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-
-        var collections = await db.Collections
-            .Where(c => c.OwnerId == Users.LocalUserId)
-            .ExecuteUpdateAsync(s => s.SetProperty(c => c.OwnerId, userId), ct);
 
         var favorites = await db.Favorites
             .Where(f => f.UserId == Users.LocalUserId)
             .ExecuteUpdateAsync(s => s.SetProperty(f => f.UserId, userId), ct);
 
-        if (collections + favorites > 0)
+        if (favorites > 0)
         {
             log.LogInformation(
-                "Transferred {Collections} collection(s) and {Favorites} favorite(s) to the first account",
-                collections, favorites);
+                "Transferred {Favorites} favorite(s) to the first account", favorites);
         }
     }
 }

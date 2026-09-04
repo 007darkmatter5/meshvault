@@ -115,8 +115,9 @@ public class AccountSetupTests : IDisposable
     }
 
     /// <summary>
-    /// Collections and favorites created before accounts existed carry the
-    /// stand-in owner id, and must follow the owner into their real account.
+    /// Favorites created before accounts existed carry the stand-in owner id,
+    /// and must follow the owner into their real account. Collections have no
+    /// owner to follow: they belong to the library.
     /// </summary>
     [Fact]
     public async Task The_first_account_adopts_data_created_before_sign_in_existed()
@@ -125,10 +126,7 @@ public class AccountSetupTests : IDisposable
         {
             db.Libraries.Add(new Library { Name = "L", Path = "/l" });
             db.Models.Add(new ModelEntry { LibraryId = 1, Name = "M", RelativePath = "m" });
-            db.Collections.Add(new Collection
-            {
-                Name = "To Print", NormalizedName = "to print", OwnerId = Users_LocalId,
-            });
+            db.Collections.Add(new Collection { Name = "To Print", NormalizedName = "to print" });
             await db.SaveChangesAsync();
 
             db.Favorites.Add(new ModelFavorite { ModelEntryId = 1, UserId = Users_LocalId });
@@ -140,24 +138,30 @@ public class AccountSetupTests : IDisposable
 
         await using (var db = NewDb())
         {
-            Assert.Equal(user!.Id, (await db.Collections.SingleAsync()).OwnerId);
-            Assert.Equal(user.Id, (await db.Favorites.SingleAsync()).UserId);
-            Assert.Empty(await db.Collections.Where(c => c.OwnerId == Users_LocalId).ToListAsync());
+            Assert.Equal(user!.Id, (await db.Favorites.SingleAsync()).UserId);
+
+            // Untouched rather than transferred, and still there. Adoption used
+            // to rewrite an owner column that no longer exists.
+            Assert.Equal("To Print", (await db.Collections.SingleAsync()).Name);
         }
     }
 
     [Fact]
     public async Task A_later_account_does_not_adopt_anything()
     {
+        await using (var db = NewDb())
+        {
+            db.Libraries.Add(new Library { Name = "L", Path = "/l" });
+            db.Models.Add(new ModelEntry { LibraryId = 1, Name = "M", RelativePath = "m" });
+            await db.SaveChangesAsync();
+        }
+
         await Accounts.RegisterAsync("mark", null, "correcthorse", null);
         var mark = await Users.FindByNameAsync("mark");
 
         await using (var db = NewDb())
         {
-            db.Collections.Add(new Collection
-            {
-                Name = "Mine", NormalizedName = "mine", OwnerId = mark!.Id,
-            });
+            db.Favorites.Add(new ModelFavorite { ModelEntryId = 1, UserId = mark!.Id });
             await db.SaveChangesAsync();
         }
 
@@ -166,8 +170,8 @@ public class AccountSetupTests : IDisposable
 
         await using (var db = NewDb())
         {
-            // Mark's collection stays Mark's.
-            Assert.Equal(mark!.Id, (await db.Collections.SingleAsync()).OwnerId);
+            // Mark's favorite stays Mark's.
+            Assert.Equal(mark!.Id, (await db.Favorites.SingleAsync()).UserId);
         }
     }
 
