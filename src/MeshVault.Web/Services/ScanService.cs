@@ -100,8 +100,26 @@ public class ScanService(IServiceScopeFactory scopeFactory, ILogger<ScanService>
             ? $"Saving {p.ModelsSeen:N0} models..."
             : $"{p.ModelsSeen:N0} models, {p.FilesSeen:N0} files so far";
 
+    /// <summary>
+    /// Publishes a status as the scan itself would. Exists so a test can post a
+    /// late progress report deliberately rather than racing for one.
+    /// </summary>
+    internal void Report(ScanStatus status) => Update(status);
+
     private void Update(ScanStatus status)
     {
+        // A progress report can arrive after the scan that produced it has
+        // finished. Progress<T> dispatches asynchronously, so one queued moments
+        // before the end lands whenever the thread pool gets to it -- sometimes
+        // after the completion status has already been published.
+        //
+        // Letting it through overwrites "finished" with "still running", and
+        // there is no further event coming to put that right: the page sits on
+        // "Scanning..." forever, and GetStatus lies to anyone who asks. The
+        // running flag is the authority, and it is cleared before completion is
+        // announced precisely so that this check can be made.
+        if (status.Running && !IsRunning(status.LibraryId)) return;
+
         _status[status.LibraryId] = status;
 
         // Handlers are invoked one at a time: a subscriber whose circuit has

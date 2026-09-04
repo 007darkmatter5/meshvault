@@ -117,6 +117,32 @@ public class ScanServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_progress_report_that_outlives_its_scan_is_ignored()
+    {
+        // Progress<T> dispatches asynchronously, so a report queued moments
+        // before a scan ends lands whenever the thread pool gets to it --
+        // sometimes after the completion status. Overwriting "finished" with
+        // "still running" leaves the page on "Scanning..." for good, because
+        // there is no further event coming to correct it.
+        File_("Dragon/dragon.stl");
+        var scans = NewService();
+
+        var done = new TaskCompletionSource();
+        scans.Changed += () => { if (!scans.IsRunning(1)) done.TrySetResult(); };
+
+        scans.TryStart(1);
+        await done.Task.WaitAsync(TestTimeout);
+
+        var finished = scans.GetStatus(1);
+
+        // A straggler, arriving the way a real one would: after the end.
+        scans.Report(new ScanStatus(1, true, "Reading Dragon...", null, DateTimeOffset.UtcNow));
+
+        Assert.Same(finished, scans.GetStatus(1));
+        Assert.False(scans.GetStatus(1)!.Running);
+    }
+
+    [Fact]
     public async Task A_failing_scan_still_clears_the_running_flag()
     {
         var scans = NewService();
