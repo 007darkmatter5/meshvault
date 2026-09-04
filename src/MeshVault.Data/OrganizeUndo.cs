@@ -160,6 +160,12 @@ public class OrganizeUndo(
                 && string.Equals(model.RelativePath, step.To, StringComparison.Ordinal))
             {
                 model.RelativePath = step.From;
+
+                // The name follows the folder here for the same reason it does
+                // going forwards. Putting the folder back and leaving the name
+                // organizing gave it would undo half of what happened, and the
+                // half left behind is the half people can see.
+                if (!model.NameSetByUser) model.Name = step.From.Split('/')[^1];
             }
         }
 

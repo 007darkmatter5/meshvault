@@ -72,6 +72,51 @@ public class LibraryIndexerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_scan_puts_a_derived_name_back_in_step_with_its_folder()
+    {
+        // The name was read off the folder only when the row was inserted, so
+        // it stopped tracking the moment anything else wrote it -- and nothing
+        // put it right. Organizing did exactly that: two cuts of a mini merging
+        // into "otto bismark" left the merged row still called "Otto Bismark
+        // supported", and no amount of rescanning corrected it.
+        File_("Dragon/dragon.stl");
+        await Index();
+
+        using (var db = NewDb())
+        {
+            var model = await db.Models.SingleAsync();
+            model.Name = "Something Else";
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(1, (await Index()).Updated);
+
+        using (var db = NewDb())
+            Assert.Equal("Dragon", (await db.Models.SingleAsync()).Name);
+    }
+
+    [Fact]
+    public async Task A_name_somebody_typed_survives_a_scan()
+    {
+        // The other half of the bargain, and the reason the flag exists.
+        File_("Dragon/dragon.stl");
+        await Index();
+
+        using (var db = NewDb())
+        {
+            var model = await db.Models.SingleAsync();
+            model.Name = "Spring Dragon";
+            model.NameSetByUser = true;
+            await db.SaveChangesAsync();
+        }
+
+        await Index();
+
+        using (var db = NewDb())
+            Assert.Equal("Spring Dragon", (await db.Models.SingleAsync()).Name);
+    }
+
+    [Fact]
     public async Task Rescan_preserves_tags_notes_and_favorites()
     {
         File_("Dragon/dragon.stl");
@@ -87,7 +132,7 @@ public class LibraryIndexerTests : IDisposable
             model.SourceSite = "MakerWorld";
             model.License = "CC BY-NC 4.0";
             model.Favorites.Add(new ModelFavorite { UserId = Users.LocalUserId });
-            model.Collections.Add(new Collection { Name = "To Print", OwnerId = Users.LocalUserId });
+            model.Collections.Add(new Collection { Name = "To Print", NormalizedName = "to print" });
             await db.SaveChangesAsync();
         }
 

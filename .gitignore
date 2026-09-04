@@ -13,3 +13,6 @@ data/
 staging/
 keys/
 *.mvm
+
+# Scratch library for trying organize against real files.
+demo-library/

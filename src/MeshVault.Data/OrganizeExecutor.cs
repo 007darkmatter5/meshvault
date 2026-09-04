@@ -263,6 +263,27 @@ public class OrganizeExecutor(
                             FromModelId = owned,
                             ToModelCreated = owner.IsNew,
                         });
+
+                        // Pin what this file was read as, at the moment the
+                        // reading stops being repeatable. Both halves of the
+                        // evidence are going: the words in the name, if it was
+                        // renamed, and the folders standing above it inside its
+                        // model, which filing flattens. Left unpinned, the next
+                        // scan reads back a name the app wrote itself and
+                        // quietly downgrades the row -- a hollowed export
+                        // becoming plain, a sculpt relabelled off its own new
+                        // filename. That is the bug SculptNameRestorer was
+                        // written to repair after the fact.
+                        //
+                        // Meshes only, and only ones that were actually read. A
+                        // companion has no sculpt of its own by design, and a
+                        // file with no key is asking to be given a name rather
+                        // than to be frozen without one.
+                        if (file.Kind is FileKind.Mesh or FileKind.Cad
+                            && file.SculptKey is not null)
+                        {
+                            file.VariantSetByOrganize = true;
+                        }
                     }
 
                     // Only what actually happened. A model already in place with
@@ -287,6 +308,21 @@ public class OrganizeExecutor(
             }
 
             owner.Model.RelativePath = group.Key;
+
+            // A model's name is read off its folder, and organizing is the one
+            // thing that moves a folder without a scan there to notice. A row
+            // created for a destination is named from it (OwnerForAsync), but a
+            // reused one kept whatever it was called before -- so two cuts of a
+            // mini merging into "otto bismark" left the merged row still called
+            // "Otto Bismark supported", and its card said one thing while its
+            // path said another.
+            //
+            // A name somebody typed is theirs and survives, exactly as it
+            // survives a scan.
+            if (!owner.Model.NameSetByUser)
+            {
+                owner.Model.Name = group.Key.Split('/')[^1];
+            }
 
             // Saved per destination rather than once at the end. A failure part
             // way through then leaves everything before it both moved and
