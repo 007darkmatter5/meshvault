@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace MeshVault.Core.Services;
 
@@ -66,6 +67,32 @@ public static class NameCasing
         Choices.FirstOrDefault(c => c.Case == casing).Label ?? casing.ToString();
 
     /// <summary>
+    /// Separates a sculpt from the variants that make one copy of it unique:
+    /// <c>ud-001-wall--nologo-supported</c>.
+    /// </summary>
+    /// <remarks>
+    /// Two dashes rather than one, because one is indistinguishable from a word
+    /// break -- "wall-no-logo" cannot say whether the sculpt is "Wall" or "Wall
+    /// No". Rather than an underscore, because snake_case uses underscores for
+    /// every word and the boundary would vanish under it, and because creators
+    /// already put underscores in their filenames.
+    /// </remarks>
+    public const string VariantSeparator = "--";
+
+    /// <summary>
+    /// The separator where it means something: closed up against a word on both
+    /// sides.
+    /// </summary>
+    /// <remarks>
+    /// "Wall -- Door" is a creator padding a dash out for readability, and
+    /// collapsing that to one word break is what people expect. "wall--door" is
+    /// this app saying which half is the sculpt. Only the tight one is
+    /// structure, and telling them apart is the whole job of this pattern.
+    /// </remarks>
+    private static readonly Regex TightSeparator =
+        new(@"(?<=[\p{L}\p{N}])--(?=[\p{L}\p{N}])", RegexOptions.Compiled);
+
+    /// <summary>
     /// Rewrites <paramref name="segment"/> into <paramref name="casing"/>.
     /// </summary>
     public static string Apply(string segment, NameCase casing)
@@ -73,6 +100,19 @@ public static class NameCasing
         // The default costs nothing and changes nothing, which is what keeps
         // every library that predates this feature rendering as it always did.
         if (casing == NameCase.AsWritten) return segment;
+
+        // The separator is structure, not punctuation, so it has to survive a
+        // pass that treats every non-alphanumeric character as a word break.
+        // Handed over whole, "ud-001-wall--supported" comes back from kebab as
+        // "ud-001-wall-supported" -- the boundary eaten, and with it the whole
+        // reason for having one. Cased on each side and rejoined instead.
+        var structural = TightSeparator.Split(segment);
+        if (structural.Length > 1)
+        {
+            return string.Join(VariantSeparator, structural
+                .Select(part => Apply(part, casing))
+                .Where(part => part.Length > 0));
+        }
 
         var words = Words(segment);
         if (words.Count == 0) return "";

@@ -389,6 +389,70 @@ html, body {
 .organize-renames .rename-arrow { color: var(--mud-palette-text-disabled); }
 .organize-renames .rename-to { color: var(--mud-palette-info); }
 
+/* Which token produced which part of the destination. Wraps rather than
+   scrolling: it sits under a path that is already the widest thing in the row,
+   and a trace that pushed the column wider would cost every other row space to
+   explain one. */
+.token-trace {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 10px;
+    font-size: .7rem;
+    max-width: 460px;
+}
+.token-trace .token-part {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    min-width: 0;
+}
+.token-trace .token-name {
+    font-family: ui-monospace, monospace;
+    color: var(--mud-palette-text-disabled);
+}
+.token-trace .token-name::after { content: "="; margin-left: 3px; }
+.token-trace .token-value {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--mud-palette-text-secondary);
+}
+.token-trace .token-empty {
+    color: var(--mud-palette-warning);
+    font-style: italic;
+}
+
+/* Sculpts, and the models within each ------------------------------------- */
+
+/* A rule between sculpts rather than a card each: a pack of forty would
+   otherwise be forty boxes, and the thing being compared is what is inside
+   them. */
+.sculpt-block + .sculpt-block {
+    border-top: 1px solid var(--mud-palette-divider);
+    margin-top: 10px;
+    padding-top: 10px;
+}
+.sculpt-model {
+    padding-left: 8px;
+    min-height: 26px;
+}
+
+/* Fixed column for the variant, so the eye runs down "Plain / Supported /
+   Hollowed" instead of hunting for it at a different offset on every row. */
+.sculpt-model .variant-name {
+    flex: 0 0 auto;
+    min-width: 140px;
+}
+.sculpt-model .file-name {
+    font-family: ui-monospace, monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.sculpt-actions {
+    border-top: 1px solid var(--mud-palette-divider);
+}
+
 /* Paints ------------------------------------------------------------------ */
 
 .paint-swatch {

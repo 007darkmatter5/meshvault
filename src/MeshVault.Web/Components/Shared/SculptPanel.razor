@@ -1,0 +1,332 @@
+@*
+    The sculpts a folder holds, and the models within each of them.
+
+    This replaced an editor tucked inside a row of the file table, which could
+    only ever correct one file and had no idea the others existed. That made the
+    two things people actually want impossible: renaming a sculpt meant editing
+    each of its files and typing the same name into every one -- where one slip
+    left two sculpts a letter apart and nothing on screen saying why they had
+    stopped grouping -- and marking four exports supported meant four rounds of
+    the same dialog.
+
+    Laid out as sculpt, then models within it, because that is the shape of the
+    thing: a sculpt is which mini, and a model is which combination of variants
+    makes one copy of it unique.
+
+    Renaming onto a name another sculpt already has merges them, and says so
+    before it happens. That is not a special case -- the key is what groups, so
+    two files carrying one key are one sculpt -- which is why there is no
+    separate merge button here to drift out of step with it.
+*@
+
+<MudPaper Outlined="true" Class="pa-4 mb-4">
+    <div class="d-flex align-center justify-space-between mb-1">
+        <MudText Typo="Typo.overline" Class="mud-text-secondary">
+            Sculpts (@Sculpts.Count)
+        </MudText>
+        @if (_selected.Count > 0)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">@_selected.Count selected</MudText>
+        }
+    </div>
+
+    @* The Orc Warband case, said where somebody is already looking. A folder
+       holding three minis reads as one thing everywhere else in the app -- one
+       card, one name, one row in the plan -- and nothing said that the name on
+       it belongs to the pack rather than to any of the minis inside. *@
+    @if (Sculpts.Count > 1)
+    {
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+            This folder holds <strong>@Sculpts.Count sculpts</strong>, so its name is the pack's
+            rather than any one mini's. Organizing gives each sculpt a folder of its own, and the
+            pack's name is worth keeping as a collection.
+        </MudText>
+    }
+
+    @foreach (var sculpt in Sculpts)
+    {
+        var key = sculpt.Key;
+        <div class="sculpt-block">
+            <div class="d-flex align-center gap-2 flex-wrap">
+                @if (_renaming == key)
+                {
+                    <MudTextField @bind-Value="_renameDraft" Variant="Variant.Outlined"
+                                  Margin="Margin.Dense" Immediate="true" Label="Sculpt name"
+                                  Style="max-width:280px" />
+                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                               Disabled="@(_busy || string.IsNullOrWhiteSpace(_renameDraft))"
+                               OnClick="@(() => Rename(key))">Save</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="_busy"
+                               OnClick="CancelRename">Cancel</MudButton>
+
+                    @* Said before it happens rather than discovered afterwards. *@
+                    @if (MergeTarget(key, _renameDraft) is { } into)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Warning">
+                            Merges into <strong>@into</strong> &mdash; both become one sculpt.
+                        </MudText>
+                    }
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Style="font-weight:600">@sculpt.Name</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        @sculpt.Variants.Count model@(sculpt.Variants.Count == 1 ? "" : "s")
+                    </MudText>
+                    @if (CanEdit)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                       title="Rename this sculpt, or merge it into another"
+                                       OnClick="@(() => StartRename(key, sculpt.Name))" />
+                    }
+                }
+            </div>
+
+            @foreach (var variant in sculpt.Variants)
+            {
+                <div class="d-flex align-center gap-2 sculpt-model">
+                    @if (CanEdit)
+                    {
+                        <MudCheckBox T="bool" Dense="true" Size="Size.Small"
+                                     Value="@_selected.Contains(variant.File.Id)"
+                                     ValueChanged="@(v => Select(variant.File.Id, v))" />
+                    }
+                    <MudText Typo="Typo.caption" Class="variant-name">@variant.Display</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary file-name">
+                        @variant.File.FileName
+                    </MudText>
+                    @if (variant.File.VariantSetByUser)
+                    {
+                        <MudTooltip Text="Set by hand. Rescans and vocabulary changes leave this alone.">
+                            <MudIcon Icon="@Icons.Material.Filled.PushPin" Size="Size.Small"
+                                     Class="mud-text-secondary" />
+                        </MudTooltip>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @* A mesh whose name was nothing but variant words has no sculpt, and
+       organizing refuses to file it until somebody gives it one. Hiding these
+       would leave that refusal unexplained on the other page. *@
+    @if (Unnamed.Count > 0)
+    {
+        <div class="sculpt-block">
+            <div class="d-flex align-center gap-2 flex-wrap">
+                <MudText Typo="Typo.body2" Style="font-weight:600" Color="Color.Warning">
+                    Needs a name (@Unnamed.Count)
+                </MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    Their names say only which variant they are, so nothing can file them.
+                </MudText>
+            </div>
+            @foreach (var file in Unnamed)
+            {
+                <div class="d-flex align-center gap-2 sculpt-model">
+                    @if (CanEdit)
+                    {
+                        <MudCheckBox T="bool" Dense="true" Size="Size.Small"
+                                     Value="@_selected.Contains(file.Id)"
+                                     ValueChanged="@(v => Select(file.Id, v))" />
+                    }
+                    <MudText Typo="Typo.caption" Class="variant-name">
+                        @(file.VariantLabel ?? "Plain")
+                    </MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary file-name">
+                        @file.FileName
+                    </MudText>
+                </div>
+            }
+        </div>
+    }
+
+    @if (CanEdit && _selected.Count > 0)
+    {
+        <div class="d-flex flex-wrap align-center gap-2 mt-3 pt-3 sculpt-actions">
+            <MudAutocomplete T="string" @bind-Value="_moveDraft" Label="Move to sculpt"
+                             Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined"
+                             CoerceValue="true" SearchFunc="SearchSculpts"
+                             ResetValueOnEmptyText="false" Style="min-width:220px" />
+            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                       Disabled="@(_busy || string.IsNullOrWhiteSpace(_moveDraft))"
+                       OnClick="Move">Move @_selected.Count</MudButton>
+
+            <MudSelect T="string" MultiSelection="true" SelectedValues="_labelDraft"
+                       SelectedValuesChanged="OnLabelsChanged" Label="Set variants"
+                       Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined"
+                       MultiSelectionTextFunc="LabelSummary" Style="min-width:220px">
+                @foreach (var definition in Variants.Where(d => !d.IsFiller))
+                {
+                    <MudSelectItem T="string" Value="@definition.Name">@definition.Name</MudSelectItem>
+                }
+            </MudSelect>
+            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                       Disabled="_busy" OnClick="ApplyVariants">Apply to @_selected.Count</MudButton>
+
+            <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="_busy"
+                       OnClick="BackToDetected">Back to detected</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="_busy"
+                       OnClick="ClearSelection">Clear</MudButton>
+        </div>
+    }
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public int ModelId { get; set; }
+    [Parameter, EditorRequired] public IReadOnlyList<SculptGroup> Sculpts { get; set; } = [];
+
+    /// <summary>Meshes carrying no sculpt, which organizing will not file.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<ModelFile> Unnamed { get; set; } = [];
+
+    [Parameter, EditorRequired] public IReadOnlyList<VariantDefinition> Variants { get; set; } = [];
+    [Parameter] public bool CanEdit { get; set; }
+
+    /// <summary>Raised after any change, so the page can reload and regroup.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    [Inject] private ModelEditor Editor { get; set; } = default!;
+    [Inject] private ISnackbar Snackbar { get; set; } = default!;
+
+    private readonly HashSet<int> _selected = [];
+    private string? _renaming;
+    private string _renameDraft = "";
+    private string _moveDraft = "";
+    private IReadOnlyCollection<string> _labelDraft = [];
+    private bool _busy;
+
+    private void Select(int fileId, bool on)
+    {
+        if (on) _selected.Add(fileId); else _selected.Remove(fileId);
+    }
+
+    private void ClearSelection() => _selected.Clear();
+
+    private void StartRename(string key, string name)
+    {
+        _renaming = key;
+        _renameDraft = name;
+    }
+
+    private void CancelRename() => _renaming = null;
+
+    /// <summary>
+    /// The sculpt this rename would fold into, or null when it stands alone.
+    /// </summary>
+    /// <remarks>
+    /// Compared on the key rather than the name, because the key is what
+    /// actually groups: "Goblin King" and "goblin king" are one sculpt however
+    /// they are spelled.
+    /// </remarks>
+    private string? MergeTarget(string key, string? draft)
+    {
+        if (string.IsNullOrWhiteSpace(draft)) return null;
+
+        var wanted = VariantClassifier.NormalizeKey(draft.Trim());
+        if (string.Equals(wanted, key, StringComparison.OrdinalIgnoreCase)) return null;
+
+        return Sculpts.FirstOrDefault(s =>
+            string.Equals(s.Key, wanted, StringComparison.OrdinalIgnoreCase))?.Name;
+    }
+
+    private Task<IEnumerable<string>> SearchSculpts(string? value, CancellationToken ct)
+    {
+        var names = Sculpts.Select(s => s.Name)
+            .Where(n => string.IsNullOrWhiteSpace(value)
+                        || n.Contains(value, StringComparison.OrdinalIgnoreCase))
+            .Order(StringComparer.OrdinalIgnoreCase);
+
+        return Task.FromResult<IEnumerable<string>>(names);
+    }
+
+    private void OnLabelsChanged(IReadOnlyCollection<string> picked) => _labelDraft = picked;
+
+    private string LabelSummary(IReadOnlyList<string> picked) =>
+        picked.Count == 0 ? "Plain" : string.Join(", ", picked.Order(StringComparer.OrdinalIgnoreCase));
+
+    private Task Rename(string key) => Run(async () =>
+    {
+        var merging = MergeTarget(key, _renameDraft);
+        var changed = await Editor.RenameSculptAsync(ModelId, key, _renameDraft);
+        _renaming = null;
+
+        Snackbar.Add(
+            merging is null
+                ? $"Renamed to {_renameDraft.Trim()} ({changed} file(s))"
+                : $"Merged into {merging} ({changed} file(s))",
+            Severity.Success);
+    });
+
+    private Task Move() => Run(async () =>
+    {
+        // Each file keeps the variants it already carries: which mini this is
+        // and which cut of it are different questions, and moving a supported
+        // export into the right sculpt must not quietly declare it plain.
+        var moved = await Editor.SetSculptAsync(_selected, _moveDraft, VariantsOf(_selected));
+        Snackbar.Add($"Moved {moved} model(s) to {_moveDraft.Trim()}", Severity.Success);
+        _selected.Clear();
+        _moveDraft = "";
+    });
+
+    private Task ApplyVariants() => Run(async () =>
+    {
+        var chosen = Variants.Where(d => _labelDraft.Contains(d.Name)).ToList();
+        var changed = await Editor.SetVariantsAsync(_selected, chosen);
+        Snackbar.Add($"Set variants on {changed} model(s)", Severity.Success);
+        _selected.Clear();
+    });
+
+    private Task BackToDetected() => Run(async () =>
+    {
+        var count = _selected.Count;
+        foreach (var id in _selected) await Editor.ResetVariantAsync(id);
+        Snackbar.Add($"{count} model(s) handed back to detection", Severity.Success);
+        _selected.Clear();
+    });
+
+    /// <summary>
+    /// The variants the selected files already carry, when they all agree.
+    /// </summary>
+    /// <remarks>
+    /// A move sets sculpt and variants together, so it needs something to set.
+    /// Files that disagree get nothing rather than one of their answers imposed
+    /// on the rest -- "Set variants" is the control for saying what they should
+    /// be, and guessing here would make a move quietly do two things.
+    /// </remarks>
+    private List<VariantDefinition> VariantsOf(IEnumerable<int> fileIds)
+    {
+        var ids = fileIds.ToHashSet();
+
+        var labels = Sculpts.SelectMany(s => s.Variants)
+            .Where(v => ids.Contains(v.File.Id))
+            .Select(v => v.File.VariantLabel)
+            .Concat(Unnamed.Where(f => ids.Contains(f.Id)).Select(f => f.VariantLabel))
+            .Distinct()
+            .ToList();
+
+        if (labels.Count != 1 || labels[0] is not { } shared) return [];
+
+        var wanted = shared.Split(',',
+            StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+        return Variants.Where(d => wanted.Contains(d.Name, StringComparer.OrdinalIgnoreCase)).ToList();
+    }
+
+    private async Task Run(Func<Task> work)
+    {
+        _busy = true;
+        try
+        {
+            await work();
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not do that: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
