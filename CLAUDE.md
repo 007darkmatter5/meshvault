@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 dotnet build                                  # whole solution
-dotnet test                                   # all 571 tests, ~6s
+dotnet test                                   # all 576 tests, ~6s
 dotnet run --project src/MeshVault.Web        # http://localhost:5082 in Development
 
 # One class, or one test
@@ -531,6 +531,18 @@ last-admin and self-delete guards, which protect against something else entirely
 
 Password rules are **length-only** (10 characters, no composition requirements). They are declared
 in `Program.cs`, `Register.razor`, `Account.razor` and each test harness — change all of them together.
+
+### The paint chart
+
+`PaintCharts.WarpaintsFanatic` is The Army Painter's "Flexible Triad System" poster as data, and
+`/paints/chart` reads it against the signed-in rack. It is shipped where `PaintBrand` is deliberately
+curated, because a brand list is an opinion that goes stale and a printed chart is a document. It
+**writes nothing until a hexagon is clicked**: the match is by `NormalizedName` at read time, the
+same key a rack is unique on, so a bottle recorded under any brand spelling still lights up.
+
+The swatches were sampled from the poster's pixels, which are **Adobe RGB (1998)** - the PDF tags
+an otherwise untagged JPEG - and converted to sRGB. Read raw they come out visibly duller (Pure Red
+as `#ab0b15` rather than `#c8030e`), so do the same for another chart from the same maker.
 
 Settings chosen in the UI go in the `Settings` table via `SettingsStore`; deployment settings come
 from `MeshVaultOptions`/environment. Do not conflate them.
