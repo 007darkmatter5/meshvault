@@ -569,3 +569,73 @@ html, body {
 
 .brand-row { padding: 12px 0; }
 .brand-row + .brand-row { border-top: 1px solid var(--mud-palette-lines-default); }
+
+/* The triad chart. Two families abreast, as the poster prints them, so a row
+   still reads across from one group of six into its neighbour. */
+.triad-chart {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px 36px;
+    max-width: 1400px;
+}
+@media (max-width: 960px) {
+    .triad-chart { grid-template-columns: minmax(0, 1fr); }
+}
+.triad-family-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+.triad-row {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 4px;
+}
+
+/* A hexagon cannot carry a border - clip-path cuts it off - so the ring is
+   the button itself showing round an inset copy of the same shape. */
+.triad-hex {
+    --ring: var(--mud-palette-lines-default);
+    position: relative;
+    aspect-ratio: 0.866;
+    padding: 0;
+    border: 0;
+    font: inherit;
+    background: var(--ring);
+    clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+    cursor: pointer;
+    transition: opacity .15s, filter .15s;
+    /* Lets the label size itself to the hexagon rather than the window. */
+    container-type: inline-size;
+}
+.triad-hex:hover, .triad-hex:focus-visible { filter: brightness(1.12); outline: none; }
+.triad-hex-fill {
+    position: absolute;
+    inset: 3px;
+    clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+    background: var(--paint);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    padding: 0 6%;
+    color: #fff;
+    font-size: clamp(.5rem, 12cqw, .82rem);
+    font-weight: 600;
+    line-height: 1.1;
+    text-align: center;
+}
+.triad-hex-light { color: #1b1b1b; }
+.triad-hex-mark.mud-icon-root { font-size: 1.5em; }
+
+.triad-hex-have { --ring: #fff; }
+.triad-hex-low { --ring: var(--mud-palette-warning); }
+
+/* Faded rather than hidden: a gap in a triad is only readable next to the
+   colours either side of it, and hovering brings one back to look at. */
+.triad-chart-highlight .triad-hex-missing { opacity: .25; }
+.triad-chart-highlight .triad-hex-wanted { opacity: .6; }
+.triad-chart-highlight .triad-hex:hover,
+.triad-chart-highlight .triad-hex:focus-visible { opacity: 1; }

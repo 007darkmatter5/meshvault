@@ -1,0 +1,161 @@
+@page "/paints/chart"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject PaintStore Rack
+@inject SettingsStore Settings
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Triad chart - MeshVault</PageTitle>
+
+@if (!_enabled)
+{
+    <MudAlert Severity="Severity.Info">
+        Painting is turned off on this MeshVault. An administrator can turn it on in Settings.
+    </MudAlert>
+}
+else
+{
+    <div class="d-flex align-center justify-space-between mb-1">
+        <MudText Typo="Typo.h5">@Chart.Range triads</MudText>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Palette"
+                   Href="/paints">Paint rack</MudButton>
+    </div>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
+        @Chart.Brand's <MudLink Href="@Chart.SourceUrl" Target="_blank" rel="noopener">@Chart.Title</MudLink>
+        chart, read against your rack. Each group of six runs dark to light, so any three in order are
+        a shadow, a midtone and a highlight. Click a paint you own to put it on your rack; click one
+        already there to change it.
+    </MudText>
+
+    <div class="d-flex align-center flex-wrap gap-4 mb-4">
+        <MudText Typo="Typo.body1">
+            <b>@OnShelf</b> of @Total on your shelf@(Wanted > 0 ? $", {Wanted} on the shopping list" : "")
+        </MudText>
+        <MudSpacer />
+        @* The one option, because the two readings pull apart: finding a gap
+           wants everything unowned faded, and choosing a colour wants it not. *@
+        <MudSwitch T="bool" @bind-Value="_highlight" Color="Color.Primary" Label="Fade what I don't have" />
+    </div>
+
+    <div class="triad-chart @(_highlight ? "triad-chart-highlight" : "")">
+        @foreach (var family in Chart.Families)
+        {
+            <section class="triad-family">
+                <div class="triad-family-head">
+                    <MudText Typo="Typo.subtitle2">@family.Name</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        @family.Paints.Count(IsOnShelf) / @family.Paints.Count
+                    </MudText>
+                </div>
+                <div class="triad-row">
+                    @foreach (var paint in family.Paints)
+                    {
+                        var mine = Mine(paint);
+                        <button type="button" class="triad-hex @StateClass(mine)" title="@Describe(paint, mine)"
+                                style="@($"--paint:{paint.Hex}")" @onclick="@(() => Pick(paint))">
+                            <span class="triad-hex-fill @(paint.IsLight ? "triad-hex-light" : "")">
+                                <span>@paint.Name</span>
+                                @if (mine is not null)
+                                {
+                                    <MudIcon Icon="@StateIcon(mine.Stock)" Class="triad-hex-mark" />
+                                }
+                            </span>
+                        </button>
+                    }
+                </div>
+            </section>
+        }
+    </div>
+}
+
+@code {
+    private static readonly PaintChart Chart = PaintCharts.WarpaintsFanatic;
+    private static readonly int Total = Chart.Paints.Count();
+
+    /// <summary>The rack by the key it is unique on, which is also how a chart names a paint.</summary>
+    private Dictionary<string, Paint> _rack = [];
+    private bool _enabled;
+    private bool _highlight = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _enabled = await Settings.GetBoolAsync(SettingKeys.PaintsEnabled);
+        if (_enabled) await LoadAsync();
+    }
+
+    private async Task LoadAsync() =>
+        _rack = (await Rack.GetRackAsync()).ToDictionary(p => p.NormalizedName);
+
+    private Paint? Mine(ChartPaint paint) => _rack.GetValueOrDefault(paint.NormalizedName);
+
+    private bool IsOnShelf(ChartPaint paint) => Mine(paint) is { } mine && mine.Stock.IsOnTheShelf();
+
+    private int OnShelf => Chart.Paints.Count(IsOnShelf);
+
+    /// <summary>On the rack without being on the shelf: run out, or meant to buy.</summary>
+    private int Wanted => Chart.Paints.Count(p => Mine(p) is { } mine && !mine.Stock.IsOnTheShelf());
+
+    private static string StateClass(Paint? mine) => mine?.Stock switch
+    {
+        null => "triad-hex-missing",
+        PaintStock.Have => "triad-hex-have",
+        PaintStock.Low => "triad-hex-have triad-hex-low",
+        _ => "triad-hex-wanted",
+    };
+
+    private static string StateIcon(PaintStock stock) => stock switch
+    {
+        PaintStock.Have => Icons.Material.Filled.Check,
+        PaintStock.Low => Icons.Material.Filled.Warning,
+        _ => Icons.Material.Filled.ShoppingCart,
+    };
+
+    private static string Describe(ChartPaint paint, Paint? mine) => mine?.Stock switch
+    {
+        null => $"{paint.Name} - not on your rack",
+        PaintStock.Have => $"{paint.Name} - on your shelf",
+        PaintStock.Low => $"{paint.Name} - running low",
+        PaintStock.Out => $"{paint.Name} - run out",
+        _ => $"{paint.Name} - on your shopping list",
+    };
+
+    private async Task Pick(ChartPaint paint)
+    {
+        if (Mine(paint) is { } mine)
+        {
+            var dialog = await Dialogs.ShowAsync<PaintDialog>("Edit paint", PaintDialog.For(mine));
+            if ((await dialog.Result) is { Canceled: false }) await LoadAsync();
+            return;
+        }
+
+        var added = await Rack.AddPaintAsync(new Paint
+        {
+            Name = paint.Name,
+            Brand = Chart.Brand,
+            Range = Chart.Range,
+            Hex = paint.Hex,
+            Finish = PaintFinish.Matte,
+            Stock = PaintStock.Have,
+        });
+        if (added is null) return;
+
+        _rack[added.NormalizedName] = added;
+
+        // One click to add means one click to add the wrong one, standing at
+        // a shelf with a phone. The way back is on the message, not a trip to
+        // the rack to find and delete it.
+        Snackbar.Add($"{added.Name} is on your rack", Severity.Success, config =>
+        {
+            config.Action = "Undo";
+            config.OnClick = _ => InvokeAsync(() => Undo(added));
+        });
+    }
+
+    private async Task Undo(Paint added)
+    {
+        await Rack.DeletePaintAsync(added.Id);
+        await LoadAsync();
+        StateHasChanged();
+    }
+}

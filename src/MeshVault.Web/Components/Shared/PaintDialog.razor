@@ -90,6 +90,20 @@
 
     private string? _error;
 
+    /// <summary>Opens the dialog on a bottle already on the rack.</summary>
+    public static DialogParameters<PaintDialog> For(Paint paint) => new()
+    {
+        { x => x.PaintId, paint.Id },
+        { x => x.Name, paint.Name },
+        { x => x.Brand, paint.Brand ?? "" },
+        { x => x.Range, paint.Range ?? "" },
+        { x => x.Hex, paint.Hex ?? "" },
+        { x => x.Finish, paint.Finish },
+        { x => x.Stock, paint.Stock },
+        { x => x.Quantity, paint.Quantity },
+        { x => x.Notes, paint.Notes ?? "" },
+    };
+
     private string SwatchStyle =>
         string.IsNullOrWhiteSpace(Hex) ? "background:transparent" : $"background:{Hex}";
 
